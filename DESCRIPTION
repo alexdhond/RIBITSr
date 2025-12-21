@@ -20,8 +20,10 @@ Imports:
     cli,
     dplyr,
     httr2,
+    janitor,
     jsonlite,
     purrr,
+    readr,
     rlang,
     sf,
     tibble
