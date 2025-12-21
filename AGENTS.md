@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-**ribits** is an R package for programmatic access to the USACE RIBITS (Regulatory In-lieu Fee and Bank Information Tracking System) API. It enables researchers and practitioners to retrieve data on wetland mitigation banks, ILF (In-Lieu Fee) programs, and umbrella instruments across the United States.
+**RIBITSr** is an R package for programmatic access to the USACE RIBITS (Regulatory In-lieu Fee and Bank Information Tracking System) API. It enables researchers and practitioners to retrieve data on wetland mitigation banks, ILF (In-Lieu Fee) programs, and umbrella instruments across the United States.
 
 ### Target Users
 - Environmental researchers studying biodiversity offset markets

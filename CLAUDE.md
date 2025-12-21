@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-Instructions for Claude Code when working on the ribits R package.
+Instructions for Claude Code when working on the RIBITSr R package.
 
 ## Quick Context
 

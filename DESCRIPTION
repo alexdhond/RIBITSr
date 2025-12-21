@@ -10,11 +10,13 @@ Encoding: UTF-8
 LazyData: true
 Roxygen: list(markdown = TRUE)
 RoxygenNote: 7.3.3
-Suggests: 
+Suggests:
+    devtools,
     httptest2,
+    roxygen2,
     testthat (>= 3.0.0)
 Config/testthat/edition: 3
-Imports: 
+Imports:
     cli,
     dplyr,
     httr2,
@@ -22,8 +24,6 @@ Imports:
     purrr,
     rlang,
     sf,
-    tibble,
-    devtools,
-    roxygen2
+    tibble
 URL: https://github.com/alexdhond/RIBITSr
 BugReports: https://github.com/alexdhond/RIBITSr/issues
