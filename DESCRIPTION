@@ -21,3 +21,5 @@ Imports:
     rlang,
     sf,
     tibble
+URL: https://github.com/alexdhond/RIBITSr
+BugReports: https://github.com/alexdhond/RIBITSr/issues
