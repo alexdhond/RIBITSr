@@ -1,25 +1,56 @@
 # R/data-catalog.R
 # Data discovery and catalog functions for RIBITSr
 
-#' Explore available RIBITS data
+#' Explore RIBITS data
 #'
-#' The first function new users should call! Shows all available data sources,
-#' what they contain, and how to access them.
+#' Unified function for data discovery. Shows available data, previews sources,
+#' and lists columns.
 #'
-#' @param source Optional. Filter to specific source: "api", "epa", "csv", or "all" (default).
-#' @param details Logical. Show detailed column information? Default FALSE for overview.
+#' @param what What to show:
+#'   - "catalog" (default): Overview of all data sources
+#'   - "preview": Preview sample data from a source
+#'   - "columns": List columns in a data source
+#'   - "api", "epa", "csv": Details about specific source
+#' @param source For preview/columns: "api", "epa", or a CSV report type
+#' @param state Optional state filter
+#' @param n Number of preview rows (default 5)
 #'
-#' @return Invisibly returns a tibble with the catalog. Prints a formatted guide.
+#' @return Varies by what parameter
 #' @export
 #' @examples
-#' # Start here! See what data is available
-#' rb_catalog()
+#' \dontrun{
+#' # See all available data
+#' rb_info()
 #'
-#' # Get details on a specific source
-#' rb_catalog("api", details = TRUE)
+#' # Preview API data
+#' rb_info("preview", source = "api", state = "OR")
 #'
-#' # See all CSV reports
-#' rb_catalog("csv")
+#' # List columns
+#' rb_info("columns", source = "epa")
+#'
+#' # Get details on specific source
+#' rb_info("api")
+#' }
+rb_info <- function(what = "catalog", source = NULL, state = NULL, n = 5) {
+  
+  if (what == "catalog") {
+    return(rb_catalog())
+  } else if (what == "preview") {
+    if (is.null(source)) cli::cli_abort("source required for preview")
+    return(rb_preview(source, state = state, n = n))
+  } else if (what == "columns") {
+    if (is.null(source)) cli::cli_abort("source required for columns")
+    return(rb_columns(source, state = state %||% "OR"))
+  } else if (what %in% c("api", "epa", "csv")) {
+    return(rb_catalog(source = what, details = TRUE))
+  } else {
+    cli::cli_abort("Unknown what: {what}. Try 'catalog', 'preview', 'columns', 'api', 'epa', or 'csv'")
+  }
+}
+
+
+#' @rdname rb_info
+#' @keywords internal
 rb_catalog <- function(source = "all", details = FALSE) {
  
  cli::cli_h1("RIBITSr Data Catalog")
@@ -32,7 +63,7 @@ rb_catalog <- function(source = "all", details = FALSE) {
    cli::cli_h2("Quick Start")
    cli::cli_code('
 # Get all California bank data (recommended starting point)
-ca_data <- rb_banks(state = "CA")
+ca_data <- ribits(state = "CA")
 
 # Access the data
 ca_data$banks          # Bank summary (1 row per bank)
@@ -171,18 +202,19 @@ flags <- rb_spatial_availability(state = "CA
    cli::cli_h3("Download CSV Reports")
    cli::cli_code('
 # List all available reports
-rb_report_types()
+rb_reports()
 
 # Download and parse a report
-data <- rb_get_report_data("credit_classification")
+file <- rb_download_report("credit_classification")
+data <- rb_read(file)
 
-# Or download raw CSV
+# Download to specific directory
 file <- rb_download_report("banks_sites", download_dir = "data/")
 ')
    
    if (details) {
      cli::cli_h3("CSV Column Details")
-     cli::cli_text("Run {.code rb_csv_structure()} for full column info")
+     cli::cli_text("Run {.code rb_reports('structure')} for full column info")
    }
  }
  
@@ -195,7 +227,7 @@ file <- rb_download_report("banks_sites", download_dir = "data/")
    
    cli::cli_code('
 # Get everything for a state
-data <- rb_banks(state = "CA")
+data <- ribits(state = "CA")
 
 # What you get:
 data$banks          # Merged: API + EPA + CSV (1 row/bank)
@@ -208,17 +240,17 @@ data$.meta          # Source info, any discrepancies
    cli::cli_h3("Filtering Options")
    cli::cli_code('
 # By state
-rb_banks(state = "OR")
+ribits(state = "OR")
 
 # By district
-rb_banks(district = "Portland")
+ribits(district = "Portland")
  
 # By specific bank IDs
-rb_banks(bank_ids = c(17, 100, 345))
+ribits(ids = c(17, 100, 345))
 
 # Choose data sources
-rb_banks(state = "CA", sources = c("api", "epa"))  # Skip CSV
-rb_banks(state = "CA", sources = "api")            # API only (fastest)
+ribits(state = "CA", sources = c("api", "epa"))  # Skip CSV
+ribits(state = "CA", sources = "api")             # API only (fastest)
 ')
  }
  
@@ -227,37 +259,19 @@ rb_banks(state = "CA", sources = "api")            # API only (fastest)
  # ==========================================================================
  cli::cli_h2("Learn More")
  cli::cli_bullets(c(
-   ">" = '{.code rb_catalog("api", details = TRUE)} - API column details',
-   ">" = '{.code rb_catalog("epa", details = TRUE)} - EPA column details',
-   ">" = '{.code rb_csv_structure()} - Full CSV report guide',
-   ">" = '{.code rb_report_types()} - List all CSV report types',
-   ">" = '{.code ?rb_banks} - Main function documentation'
+   ">" = '{.code rb_info("api")} - API column details',
+   ">" = '{.code rb_info("epa")} - EPA column details',
+   ">" = '{.code rb_reports("structure")} - Full CSV report guide',
+   ">" = '{.code rb_reports()} - List all CSV report types',
+   ">" = '{.code ?ribits} - Main function documentation'
  ))
  
  invisible(NULL)
 }
 
 
-#' Preview a data source
-#'
-#' Quickly see sample data and columns from any source without
-#' downloading everything.
-#'
-#' @param source Data source: "api", "epa", or a CSV report type
-#' @param state Optional state filter for preview
-#' @param n Number of rows to preview. Default 5.
-#'
-#' @return A tibble with sample data
-#' @export
-#' @examples
-#' # Preview API bank data
-#' rb_preview("api", state = "OR")
-#'
-#' # Preview EPA data
-#' rb_preview("epa", state = "CA")
-#'
-#' # Preview a CSV report
-#' rb_preview("credit_classification")
+#' @rdname rb_info
+#' @keywords internal
 rb_preview <- function(source, state = NULL, n = 5) {
   
   cli::cli_h2("Preview: {source}")
@@ -309,13 +323,8 @@ rb_preview <- function(source, state = NULL, n = 5) {
 }
 
 
-#' Show available columns for a data source
-#'
-#' @param source Data source: "api", "epa", or a CSV report type
-#' @param state Optional state to use for live column detection
-#'
-#' @return A tibble with column names and info
-#' @export
+#' @rdname rb_info
+#' @keywords internal
 rb_columns <- function(source, state = "OR") {
   
   data <- tryCatch({

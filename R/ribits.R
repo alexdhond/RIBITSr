@@ -2,73 +2,10 @@
 # Main user-facing functions with automatic harmonization
 # Users should primarily use these - all complexity is hidden
 
-#' Get RIBITS data (auto-harmonized from all sources)
-#'
-#' The main entry point for fetching RIBITS data. Automatically queries
-#' all available sources (RIBITS API, EPA ArcGIS, direct CSV downloads),
-#' harmonizes the data, detects discrepancies, and returns the best available data.
-#'
-#' **Note:** Most users should use the simpler wrapper functions instead:
-#' - `rb_banks()` - Get bank data
-#' - `rb_ilf_programs()` - Get ILF program data
-#' - `rb_umbrellas()` - Get umbrella instrument data
-#' - `rb_credits()` - Get credit tracking/classification data
-#'
-#' @param bank_ids Optional vector of bank IDs. If NULL, fetches all banks
-#'   matching the filter criteria.
-#' @param state Optional state filter (e.g., "CA", "TX")
-#' @param district Optional USACE district filter
-#' @param what What data to return. Options:
-#'   - "all" (default): banks, ledger, footprints, service_areas
-#'   - "banks": just bank summary data
-#'   - "ledger": transaction/credit data
-#'   - "spatial": footprints and service areas
-#' @param type Type of resource to fetch:
-#'   - "banks" (default): mitigation banks
-#'   - "ilf": In-Lieu Fee programs
-#'   - "umbrellas": Umbrella instruments
-#' @param sources Which data sources to use:
-#'   - c("api", "epa", "csv") (default): all sources
-#'   - "api": RIBITS API only
-#'   - "epa": EPA ArcGIS only
-#'   - "csv": Direct CSV downloads only
-#' @param cache Cache downloaded CSV files? Default TRUE.
-#' @param quietly Suppress progress messages. Default FALSE.
-#'
-#' @return A `ribits_data` object containing harmonized data with:
-#'   \item{banks}{Bank summary tibble}
-#'   \item{ledger}{Transaction/ledger tibble}
-#'   \item{footprints}{sf object with footprint polygons}
-#'   \item{service_areas}{sf object with service area polygons}
-#'   \item{.meta}{Metadata including sources used and any discrepancies}
-#'
+#' Internal harmonization engine
 #' @keywords internal
-#' @examples
-#' \dontrun{
-#' # Recommended: Use simple wrapper functions
-#' ca <- rb_banks(state = "CA")
-#'
-#' # Advanced: Direct ribits() usage
-#' ca <- ribits(state = "CA")
-#'
-#' # Access the data
-#' ca$banks
-#' ca$ledger
-#' ca$footprints
-#'
-#' # Check for data quality issues
-#' ca$.meta$discrepancies
-#'
-#' # Get specific banks
-#' data <- ribits(bank_ids = c(17, 100, 345))
-#'
-#' # Just get spatial data
-#' spatial <- ribits(state = "OR", what = "spatial")
-#'
-#' # Control data sources
-#' api_only <- ribits(state = "TX", sources = "api")
-#' }
-ribits <- function(bank_ids = NULL,
+#' @noRd
+.ribits_engine <- function(bank_ids = NULL,
                     state = NULL,
                     district = NULL,
                     what = "all",

@@ -1,25 +1,43 @@
 # R/quality-tools.R
 # Data quality and coverage tools
 
-#' Check data coverage for a state or region
+#' Check data coverage or quality
 #'
-#' Quickly see data availability before downloading full datasets.
-#' Shows how many banks exist and what percentage have various data types.
+#' Unified function for checking data availability (before download) or
+#' data quality (after download).
 #'
-#' @param state State filter (e.g., "CA", "OR", "TX")
-#' @param district USACE district filter
+#' @param data Either NULL (for coverage check) or a ribits_data object (for quality check)
+#' @param state State filter for coverage check
+#' @param district District filter for coverage check
 #' @param quietly Suppress progress messages. Default FALSE.
 #'
-#' @return A tibble with coverage statistics
+#' @return Coverage stats or quality report (invisibly)
 #' @export
 #' @examples
 #' \dontrun{
-#' # Check Washington state coverage
-#' rb_coverage(state = "WA")
+#' # Check coverage before downloading
+#' rb_check(state = "WA")
 #'
-#' # Check Portland district
-#' rb_coverage(district = "Portland")
+#' # Check quality after downloading
+#' data <- ribits(state = "WA")
+#' rb_check(data)
 #' }
+rb_check <- function(data = NULL, state = NULL, district = NULL, quietly = FALSE) {
+  
+ if (is.null(data)) {
+    # Coverage check (pre-download)
+    return(rb_coverage(state = state, district = district, quietly = quietly))
+  } else if (inherits(data, "ribits_data")) {
+    # Quality check (post-download)
+    return(rb_quality_report(data, verbose = !quietly))
+  } else {
+    cli::cli_abort("data must be NULL (for coverage) or a ribits_data object (for quality)")
+  }
+}
+
+
+#' @rdname rb_check
+#' @keywords internal
 rb_coverage <- function(state = NULL, district = NULL, quietly = FALSE) {
   
   if (is.null(state) && is.null(district)) {
@@ -93,25 +111,12 @@ rb_coverage <- function(state = NULL, district = NULL, quietly = FALSE) {
 }
 
 
-#' Generate data quality report for RIBITS data
-#'
-#' Analyzes a ribits_data object and reports on data quality including
-#' missing values, source conflicts, and coverage gaps.
-#'
-#' @param data A ribits_data object returned by rb_banks() or similar
-#' @param verbose Show detailed output. Default TRUE.
-#'
-#' @return A list with quality metrics (invisibly)
-#' @export
-#' @examples
-#' \dontrun{
-#' result <- rb_banks(state = "WA")
-#' rb_quality_report(result)
-#' }
+#' @rdname rb_check
+#' @keywords internal
 rb_quality_report <- function(data, verbose = TRUE) {
   
   if (!inherits(data, "ribits_data")) {
-    cli::cli_abort("Expected a ribits_data object from rb_banks() or similar")
+    cli::cli_abort("Expected a ribits_data object from ribits() or similar")
   }
   
   report <- list()

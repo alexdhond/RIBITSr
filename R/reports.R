@@ -96,92 +96,74 @@ rb_download_report <- function(report_type,
   })
 }
 
-#' List available report types
-#' 
-#' @return A data frame of available report types and descriptions.
-#' @export
-rb_report_types <- function() {
-  registry <- CSV_REPORT_REGISTRY
-  tibble::tibble(
-    type = names(registry),
-    description = sapply(registry, function(x) x$name),
-    page_id = sapply(registry, function(x) x$page)
-  )
-}
-
-#' Get parsed report data
+#' Get information about CSV reports
 #'
-#' Downloads a RIBITS report and immediately parses it into a clean tibble.
-#' This is the most convenient way to access bulk data.
+#' Unified function for exploring available RIBITS CSV reports.
 #'
-#' @param report_type Character. The type of report to retrieve. See `rb_report_types()`.
-#' @param cache_dir Directory to cache the downloaded file. If NULL (default), uses a temporary directory.
-#' @param force Logical. If TRUE, re-downloads even if a recent cache exists.
-#' @param max_age_days Numeric. Maximum age of cache in days. Default 1.
-#'
-#' @return A tibble containing the report data.
+#' @param what What to show:
+#'   - "types" (default): List all available report types
+#'   - "structure": Show which reports are safe to merge
+#'   - A specific report type name: Show detailed info about that report
+#' @return A tibble (for "types") or printed info (for "structure" or specific report)
 #' @export
 #' @examples
 #' \dontrun{
-#' # Get all banks and sites as a dataframe
-#' banks <- rb_get_report_data("banks_sites")
+#' # List all report types
+#' rb_reports()
 #'
-#' # Get ledger transactions
-#' ledgers <- rb_get_report_data("ledger_transactions")
+#' # See merge-safe vs transaction reports
+#' rb_reports("structure")
+#'
+#' # Get info about a specific report
+#' rb_reports("credit_classification")
 #' }
-rb_get_report_data <- function(report_type,
-                               cache_dir = NULL,
-                               force = FALSE,
-                               max_age_days = 1) {
+rb_reports <- function(what = "types") {
+  registry <- CSV_REPORT_REGISTRY
   
-  # Validate report type
-  if (!report_type %in% names(CSV_REPORT_REGISTRY)) {
-    cli::cli_abort("Unknown report type: {.val {report_type}}")
-  }
-
-  # Check cache
-  if (is.null(cache_dir)) {
-    cache_dir <- file.path(tempdir(), "ribits_cache")
-  }
-
-  if (!dir.exists(cache_dir)) dir.create(cache_dir, recursive = TRUE)
-  
-  # Filename pattern: type_YYYYMMDD.csv
-  pattern <- paste0("^", report_type, "_\\d{8}\\.csv$")
-  files <- list.files(cache_dir, pattern = pattern, full.names = TRUE)
-  
-  cached_file <- NULL
-  if (length(files) > 0) {
-    # Sort by time
-    info <- file.info(files)
-    latest_idx <- which.max(info$mtime)
-    latest_file <- files[latest_idx]
-    
-    age <- as.numeric(difftime(Sys.time(), info$mtime[latest_idx], units = "days"))
-    
-    if (age < max_age_days && !force) {
-      cli::cli_alert_info("Using cached report ({round(age, 2)} days old)")
-      cached_file <- latest_file
+ if (what == "types") {
+    # List all types
+    return(tibble::tibble(
+      type = names(registry),
+      name = sapply(registry, function(x) x$name),
+      grain = sapply(registry, function(x) x$grain),
+      merge_safe = sapply(registry, function(x) isTRUE(x$merge_safe))
+    ))
+  } else if (what == "structure") {
+    # Show structure guide (inlined)
+    cli::cli_h1("RIBITS CSV Report Structure Guide")
+    cli::cli_h2("SUMMARY TABLES (1 row per entity)")
+    cli::cli_text("These can be safely merged with API/EPA data by name/ID:")
+    for (rt in names(registry)) {
+      info <- registry[[rt]]
+      if (isTRUE(info$merge_safe)) {
+        cli::cli_alert_success("{.strong {info$name}} ({rt})")
+        cli::cli_text("   Grain: {info$grain} | ID: {info$id_col}")
+      }
     }
+    cli::cli_h2("TRANSACTION TABLES (multiple rows per entity)")
+    cli::cli_text("Keep these separate - join to summary data when needed:")
+    for (rt in names(registry)) {
+      info <- registry[[rt]]
+      if (!isTRUE(info$merge_safe)) {
+        cli::cli_alert_warning("{.strong {info$name}} ({rt})")
+        cli::cli_text("   Grain: {info$grain} | ID: {info$id_col}")
+      }
+    }
+    return(invisible(NULL))
+  } else if (what %in% names(registry)) {
+    # Show specific report info
+    info <- registry[[what]]
+    cli::cli_h2("{info$name}")
+    cli::cli_text("Type: {.val {what}}")
+    cli::cli_text("Grain: {.val {info$grain}}")
+    cli::cli_text("ID column: {.val {info$id_col}}")
+    cli::cli_text("Merge safe: {.val {info$merge_safe}}")
+    cli::cli_text("")
+    cli::cli_text("{info$description}")
+    return(invisible(info))
+  } else {
+    cli::cli_abort("Unknown report type: {.val {what}}")
   }
-  
-  path <- cached_file
-  
-  if (is.null(path)) {
-    # Download fresh
-    timestamp <- format(Sys.time(), "%Y%m%d")
-    filename <- paste0(report_type, "_", timestamp, ".csv")
-    
-    path <- rb_download_report(report_type, download_dir = cache_dir, filename = filename)
-  }
-  
-  # Parse using robust reader
-  cli::cli_alert_info("Parsing data...")
-  tryCatch({
-    # Pass report type to reader in case special parsing is needed (e.g. potential_credits)
-    # The generic reader (rb_read) handles type detection or passing it down
-    rb_read(path, type = report_type)
-  }, error = function(e) {
-    cli::cli_abort("Failed to parse report: {e$message}")
-  })
 }
+
+

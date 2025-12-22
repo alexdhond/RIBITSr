@@ -465,7 +465,7 @@ rb_discrepancy_config <- function(source_priority = c("csv", "api", "epa"),
 #' @keywords internal
 #' @examples
 #' \dontrun{
-#' ca <- rb_banks(state = "CA")
+#' ca <- ribits(state = "CA")
 #'
 #' # View all discrepancies
 #' rb_discrepancy_report(ca)

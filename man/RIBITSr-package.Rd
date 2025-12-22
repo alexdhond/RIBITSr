@@ -20,10 +20,10 @@ EPA ArcGIS, direct CSV downloads) with comprehensive discrepancy detection.
 
 Use these functions for most tasks:
 \describe{
-\item{\code{\link{rb_banks}}}{Get all bank data (auto-harmonized)}
+\item{\code{\link{ribits}}}{Get bank/ILF/umbrella data (auto-harmonized)}
 \item{\code{\link{rb_transactions}}}{Get credit tracking/classification data}
-\item{\code{\link{rb_ilf_programs}}}{Get ILF program data}
-\item{\code{\link{rb_umbrellas}}}{Get umbrella instrument data}
+\item{\code{\link{rb_info}}}{Explore available data sources}
+\item{\code{\link{rb_check}}}{Check data coverage and quality}
 }
 }
 
@@ -31,15 +31,16 @@ Use these functions for most tasks:
 
 \preformatted{
 # Get California banks (all sources, auto-harmonized)
-ca <- rb_banks(state = "CA")
+ca <- ribits(state = "CA")
 
 # Access data
 ca$banks         # Bank summary
 ca$ledger        # Transaction history
 ca$footprints    # Spatial data
 
-# Get transaction data
-txns <- rb_transactions(state = "CA")
+# Get ILF programs or umbrellas
+ilf <- ribits(type = "ilf", state = "TX")
+umb <- ribits(type = "umbrellas", state = "FL")
 
 # Check data quality
 ca$.meta$discrepancies

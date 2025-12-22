@@ -36,7 +36,7 @@ EPA_LAYERS <- list(
 #' @param return_geometry Include geometry? Default TRUE.
 #'
 #' @return An sf object with the queried features
-#' @export
+#' @keywords internal
 #' @examples
 #' \dontrun{
 #' # Get all approved bank locations
@@ -200,6 +200,6 @@ rb_spatial_availability <- function(bank_ids = NULL, state = NULL, quietly = FAL
 }
 
 
-# DELETED: rb_banks_summary() - use rb_banks() + rb_coverage() instead
+# DELETED: rb_banks_summary() - use ribits() + rb_check() instead
 # DELETED: rb_spatial_availability() - use rb_coverage() instead  
 # DELETED: Deprecated EPA wrapper functions - use rb_epa() instead

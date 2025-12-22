@@ -45,3 +45,4 @@ footprints <- rb_epa_query("bank_footprints", bank_ids = c(17, 100, 500))
 ca_areas <- rb_epa_query("bank_service_areas", where = "STATE_LIST LIKE '\%CA\%'")
 }
 }
+\keyword{internal}

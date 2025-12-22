@@ -28,7 +28,7 @@ Create a comprehensive report of all data quality issues found across sources.
 }
 \examples{
 \dontrun{
-ca <- rb_banks(state = "CA")
+ca <- ribits(state = "CA")
 
 # View all discrepancies
 rb_discrepancy_report(ca)

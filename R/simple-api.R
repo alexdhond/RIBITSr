@@ -2,34 +2,37 @@
 # Simple, user-friendly API - the recommended interface for most users
 # These functions hide all complexity and "just work"
 
-#' Get all bank data (fully harmonized)
+#' Get RIBITS data (fully harmonized)
 #'
-#' The simplest way to get mitigation bank data. Automatically fetches and
-#' harmonizes data from all available sources:
+#' The main function for getting mitigation bank, ILF program, or umbrella data.
+#' Automatically fetches and harmonizes data from all available sources:
 #' - RIBITS API (real-time data)
 #' - EPA ArcGIS MapServer (spatial data)
 #' - RIBITS CSV reports (official records, fetched directly)
 #'
 #' No manual downloads required - everything is automatic!
 #'
+#' @param type Type of data to fetch:
+#'   - "banks" (default): Mitigation banks
+#'   - "ilf": In-Lieu Fee programs
+#'   - "umbrellas": Umbrella mitigation instruments
 #' @param state State filter (e.g., "CA", "OR", "TX")
 #' @param district USACE district filter (e.g., "Portland", "Sacramento")
-#' @param bank_ids Optional vector of specific bank IDs to retrieve
-#' @param ledger Include transaction/credit ledger data? Default TRUE.
+#' @param ids Optional vector of specific IDs to retrieve (bank_ids, program_ids, etc.)
+#' @param ledger Include transaction/credit ledger data? Default TRUE (banks only).
 #' @param spatial Include footprint and service area geometries? Default TRUE.
 #' @param sources Which data sources to use. Default: all available
 #'   - "api" = RIBITS API only (fast, real-time)
 #'   - "epa" = EPA ArcGIS only (spatial data)
 #'   - "csv" = Direct CSV downloads (official records)
 #'   - c("api", "epa", "csv") = All sources (recommended, default)
-#' @param cache Cache downloaded CSV files? Default TRUE. Files cached in
-#'   session temp directory and reused if called again.
+#' @param cache Cache downloaded CSV files? Default TRUE.
 #' @param quietly Suppress progress messages? Default FALSE.
 #'
 #' @return A `ribits_data` object containing:
-#'   \item{banks}{Bank summary data (tibble)}
-#'   \item{ledger}{Transaction/credit tracking data (tibble)}
-#'   \item{footprints}{Bank footprint geometries (sf object)}
+#'   \item{banks/programs/umbrellas}{Summary data (tibble)}
+#'   \item{ledger}{Transaction/credit tracking data (tibble, banks only)}
+#'   \item{footprints}{Footprint geometries (sf object)}
 #'   \item{service_areas}{Service area geometries (sf object)}
 #'   \item{.meta}{Metadata including sources used and any discrepancies}
 #'
@@ -37,54 +40,61 @@
 #' @examples
 #' \dontrun{
 #' # Get all California banks (fully harmonized, automatic!)
-#' ca_banks <- rb_banks(state = "CA")
+#' ca <- ribits(state = "CA")
 #'
 #' # Access the data
-#' ca_banks$banks           # Summary data
-#' ca_banks$ledger          # Transaction history
-#' ca_banks$footprints      # Spatial polygons
+#' ca$banks           # Summary data
+#' ca$ledger          # Transaction history
+#' ca$footprints      # Spatial polygons
 #'
-#' # Check data quality
-#' ca_banks$.meta$discrepancies  # Any conflicts between sources?
+#' # Get ILF programs
+#' ilf <- ribits(type = "ilf", state = "TX")
+#'
+#' # Get umbrella instruments
+#' umb <- ribits(type = "umbrellas", state = "FL")
 #'
 #' # Get specific banks by ID
-#' my_banks <- rb_banks(bank_ids = c(17, 100, 345))
+#' my_banks <- ribits(ids = c(17, 100, 345))
 #'
 #' # Just summary data, no spatial (faster)
-#' summary <- rb_banks(state = "OR", spatial = FALSE)
+#' summary <- ribits(state = "OR", spatial = FALSE, ledger = FALSE)
 #'
 #' # Only use API source (fastest, real-time)
-#' api_only <- rb_banks(state = "TX", sources = "api")
-#'
-#' # Export to CSV for analysis
-#' readr::write_csv(ca_banks$banks, "california_banks.csv")
+#' api_only <- ribits(state = "TX", sources = "api")
 #' }
-rb_banks <- function(state = NULL,
-                     district = NULL,
-                     bank_ids = NULL,
-                     ledger = TRUE,
-                     spatial = TRUE,
-                     sources = c("api", "epa", "csv"),
-                     cache = TRUE,
-                     quietly = FALSE) {
+ribits <- function(type = "banks",
+                   state = NULL,
+                   district = NULL,
+                   ids = NULL,
+                   ledger = TRUE,
+                   spatial = TRUE,
+                   sources = c("api", "epa", "csv"),
+                   cache = TRUE,
+                   quietly = FALSE) {
+
+  type <- match.arg(type, c("banks", "ilf", "umbrellas"))
 
   # Determine what data to fetch
-  what <- if (ledger && spatial) {
+  # Ledger only applies to banks
+  include_ledger <- ledger && type == "banks"
+  
+  what <- if (include_ledger && spatial) {
     "all"
   } else if (spatial) {
     "spatial"
-  } else if (ledger) {
+  } else if (include_ledger) {
     "ledger"
   } else {
     "banks"
   }
 
   # Call the auto-harmonization engine
-  ribits(
-    bank_ids = bank_ids,
+  .ribits_engine(
+    bank_ids = ids,
     state = state,
     district = district,
     what = what,
+    type = type,
     sources = sources,
     cache = cache,
     quietly = quietly
@@ -92,104 +102,3 @@ rb_banks <- function(state = NULL,
 }
 
 
-#' Get ILF program data (fully harmonized)
-#'
-#' Simple interface to get In-Lieu Fee (ILF) program data. Automatically
-#' fetches and harmonizes data from all available sources.
-#'
-#' @param state State filter (e.g., "CA", "OR", "TX")
-#' @param district USACE district filter
-#' @param program_ids Optional vector of specific program IDs
-#' @param spatial Include footprint and service area geometries? Default TRUE.
-#' @param sources Which data sources to use. Default: all available.
-#' @param cache Cache downloaded data? Default TRUE.
-#' @param quietly Suppress progress messages? Default FALSE.
-#'
-#' @return A `ribits_data` object with ILF program information
-#'
-#' @export
-#' @examples
-#' \dontrun{
-#' # Get all California ILF programs
-#' ca_ilf <- rb_ilf_programs(state = "CA")
-#'
-#' # Access the data
-#' ca_ilf$programs      # Program summary
-#' ca_ilf$footprints    # Program footprints
-#'
-#' # Just API data (faster)
-#' programs <- rb_ilf_programs(state = "OR", sources = "api")
-#' }
-rb_ilf_programs <- function(state = NULL,
-                             district = NULL,
-                             program_ids = NULL,
-                             spatial = TRUE,
-                             sources = c("api", "epa", "csv"),
-                             cache = TRUE,
-                             quietly = FALSE) {
-
-  what <- if (spatial) "all" else "programs"
-
-  ribits(
-    bank_ids = program_ids,  # ribits() uses bank_ids generically
-    state = state,
-    district = district,
-    what = what,
-    type = "ilf",
-    sources = sources,
-    cache = cache,
-    quietly = quietly
-  )
-}
-
-
-#' Get umbrella instrument data (fully harmonized)
-#'
-#' Simple interface to get umbrella mitigation instrument data. Automatically
-#' fetches and harmonizes data from all available sources.
-#'
-#' @param state State filter (e.g., "CA", "OR", "TX")
-#' @param district USACE district filter
-#' @param umbrella_ids Optional vector of specific umbrella IDs
-#' @param spatial Include footprint and service area geometries? Default TRUE.
-#' @param sources Which data sources to use. Default: all available.
-#' @param cache Cache downloaded data? Default TRUE.
-#' @param quietly Suppress progress messages? Default FALSE.
-#'
-#' @return A `ribits_data` object with umbrella instrument information
-#'
-#' @export
-#' @examples
-#' \dontrun{
-#' # Get all umbrella instruments
-#' umbrellas <- rb_umbrellas(state = "FL")
-#'
-#' # Access the data
-#' umbrellas$umbrellas     # Umbrella summary
-#' umbrellas$footprints    # Spatial data
-#' }
-rb_umbrellas <- function(state = NULL,
-                         district = NULL,
-                         umbrella_ids = NULL,
-                         spatial = TRUE,
-                         sources = c("api", "epa", "csv"),
-                         cache = TRUE,
-                         quietly = FALSE) {
-
-  what <- if (spatial) "all" else "umbrellas"
-
-  ribits(
-    bank_ids = umbrella_ids,
-    state = state,
-    district = district,
-    what = what,
-    type = "umbrellas",
-    sources = sources,
-    cache = cache,
-    quietly = quietly
-  )
-}
-
-
-# DELETED: rb_credits() - use rb_transactions() instead
-# DELETED: print.ribits_credits() - no longer needed
