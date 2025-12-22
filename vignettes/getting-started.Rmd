@@ -174,13 +174,10 @@ pocs <- rb_extract(bank, "pocs")
 ### Specialized Extractors
 
 ```{r specialized}
-# Get credit classifications for multiple banks
-classifications <- rb_credit_classifications(bank_ids = c(17, 100, 345))
+# Get credit classifications (from report)
+classifications <- rb_get_report_data("credit_classification")
 
-# Get service area comments
-comments <- rb_service_area_comments(bank_ids = c(17, 100))
-
-# Bulk ledger extraction
+# Bulk ledger extraction (from API)
 ledgers <- rb_bulk_ledger(bank_ids = 1:50)
 ```
 
@@ -225,35 +222,32 @@ nearby_banks <- rb_near(lat = 45.5152, lon = -122.6784, type = "banks")
 nearby_programs <- rb_near(lat = 45.5152, lon = -122.6784, type = "programs")
 ```
 
-## Manual Downloads
+## Manual Downloads (Programmatic)
 
-Some data is only available through manual download from the RIBITS website.
-RIBITSr provides helpers to streamline this process.
+Some detailed data is only available via CSV reports from the RIBITS website.
+RIBITSr can now download these directly without a browser!
 
 ### Download Reports
 
 ```{r download}
-# Open browser to Potential Credits report
-b <- rb_download("potential_credits")
-# In browser: Click Actions > Download > CSV
-# When done:
-b$close()
+# Download "Potential Credits" report directly to disk
+file_path <- rb_download_report("potential_credits")
 
-# Other available reports
-rb_download("credit_classification")
-rb_download("credit_tracking")
-rb_download("credit_withdrawal")
-rb_download("bank_summary")
+# Download to a specific directory
+rb_download_report("credit_classification", download_dir = "data/")
+
+# See all available report types
+rb_report_types()
 ```
 
 ### Read Downloaded Files
 
 ```{r read}
-# Read the downloaded CSV (auto-detects latest file)
-potential <- rb_read("potential_credits")
+# Read the downloaded file (auto-detects type)
+potential <- rb_read(file_path)
 
-# Read specific file
-cc <- rb_read("credit_classification", file = "path/to/file.csv")
+# Or download and read in one step (with caching)
+credits <- rb_get_report_data("credit_classification")
 ```
 
 ## Data Availability Summary

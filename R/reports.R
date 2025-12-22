@@ -7,7 +7,7 @@
 #' This function bypasses the need for a browser or manual navigation.
 #'
 #' @param report_type Character. The type of report to download. See `rb_report_types()`.
-#' @param download_dir Directory to save the file. Default "data/ribits_reports".
+#' @param download_dir Directory to save the file. If NULL (default), uses a temporary directory.
 #' @param filename Optional custom filename. If NULL, generates one based on report name and date.
 #' @param reset_filters Logical. If TRUE (default), attempts to reset report filters to default (RIR).
 #'
@@ -22,7 +22,7 @@
 #' file <- rb_download_report("ledger_transactions")
 #' }
 rb_download_report <- function(report_type, 
-                               download_dir = "data/ribits_reports",
+                               download_dir = NULL,
                                filename = NULL,
                                reset_filters = TRUE) {
   
@@ -39,6 +39,10 @@ rb_download_report <- function(report_type,
   config <- registry[[report_type]]
   
   # Setup directory
+  if (is.null(download_dir)) {
+    download_dir <- file.path(tempdir(), "ribits_reports")
+  }
+
   if (!dir.exists(download_dir)) {
     dir.create(download_dir, recursive = TRUE)
   }
@@ -111,12 +115,12 @@ rb_report_types <- function() {
 #' This is the most convenient way to access bulk data.
 #'
 #' @param report_type Character. The type of report to retrieve. See `rb_report_types()`.
-#' @param cache_dir Directory to cache the downloaded file. Default "data/ribits_cache".
+#' @param cache_dir Directory to cache the downloaded file. If NULL (default), uses a temporary directory.
 #' @param force Logical. If TRUE, re-downloads even if a recent cache exists.
 #' @param max_age_days Numeric. Maximum age of cache in days. Default 1.
 #'
 #' @return A tibble containing the report data.
-#' @keywords internal
+#' @export
 #' @examples
 #' \dontrun{
 #' # Get all banks and sites as a dataframe
@@ -126,7 +130,7 @@ rb_report_types <- function() {
 #' ledgers <- rb_get_report_data("ledger_transactions")
 #' }
 rb_get_report_data <- function(report_type,
-                               cache_dir = "data/ribits_cache",
+                               cache_dir = NULL,
                                force = FALSE,
                                max_age_days = 1) {
   
@@ -136,6 +140,10 @@ rb_get_report_data <- function(report_type,
   }
 
   # Check cache
+  if (is.null(cache_dir)) {
+    cache_dir <- file.path(tempdir(), "ribits_cache")
+  }
+
   if (!dir.exists(cache_dir)) dir.create(cache_dir, recursive = TRUE)
   
   # Filename pattern: type_YYYYMMDD.csv

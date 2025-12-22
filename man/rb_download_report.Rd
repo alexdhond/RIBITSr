@@ -6,7 +6,7 @@
 \usage{
 rb_download_report(
   report_type,
-  download_dir = "data/ribits_reports",
+  download_dir = NULL,
   filename = NULL,
   reset_filters = TRUE
 )
@@ -14,7 +14,7 @@ rb_download_report(
 \arguments{
 \item{report_type}{Character. The type of report to download. See \code{rb_report_types()}.}
 
-\item{download_dir}{Directory to save the file. Default "data/ribits_reports".}
+\item{download_dir}{Directory to save the file. If NULL (default), uses a temporary directory.}
 
 \item{filename}{Optional custom filename. If NULL, generates one based on report name and date.}
 

@@ -141,30 +141,6 @@ bank <- rb_get("banks", id = 17, ledger = TRUE)
 ledger <- rb_extract(bank, "ledger")
 ```
 
-#### `rb_credit_classifications()` - Credit Classifications
-
-```{r rb-cc}
-rb_credit_classifications(
-  bank_ids = NULL,       # Vector of bank IDs
-  data = NULL            # Or pre-fetched bank data
-)
-
-# Example
-cc <- rb_credit_classifications(bank_ids = c(17, 100, 345))
-```
-
-#### `rb_service_area_comments()` - Service Area Comments
-
-```{r rb-sac}
-rb_service_area_comments(
-  bank_ids = NULL,       # Vector of bank IDs
-  data = NULL            # Or pre-fetched bank data
-)
-
-# Example
-comments <- rb_service_area_comments(bank_ids = c(17, 100))
-```
-
 #### `rb_bulk_ledger()` - Bulk Ledger Extraction
 
 ```{r rb-bulk}
@@ -335,12 +311,12 @@ Returned by `rb_extract(bank, "ledger")`:
 
 | Report | Description | API Alternative |
 |--------|-------------|-----------------|
-| Credit Classification | Credits by type/jurisdiction | `rb_credit_classifications()` |
+| Credit Classification | Credits by type/jurisdiction | `rb_get_report_data()` |
 | Potential Credits | Credits by mitigation method | **None - Manual only** |
 | Credit Tracking | Transaction details | `rb_get(..., ledger = TRUE)` |
 | Credit Withdrawal | Withdrawal details | Partial via ledger |
 | Bank Summary | Bank overview | `rb_get("banks")` |
-| Service Area Comments | Service area notes | `rb_service_area_comments()` |
+| Service Area Comments | Service area notes | `rb_get_report_data()` |
 
 ### Report URLs
 

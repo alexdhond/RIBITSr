@@ -6,7 +6,7 @@
 \usage{
 rb_get_report_data(
   report_type,
-  cache_dir = "data/ribits_cache",
+  cache_dir = NULL,
   force = FALSE,
   max_age_days = 1
 )
@@ -14,7 +14,7 @@ rb_get_report_data(
 \arguments{
 \item{report_type}{Character. The type of report to retrieve. See \code{rb_report_types()}.}
 
-\item{cache_dir}{Directory to cache the downloaded file. Default "data/ribits_cache".}
+\item{cache_dir}{Directory to cache the downloaded file. If NULL (default), uses a temporary directory.}
 
 \item{force}{Logical. If TRUE, re-downloads even if a recent cache exists.}
 
@@ -36,4 +36,3 @@ banks <- rb_get_report_data("banks_sites")
 ledgers <- rb_get_report_data("ledger_transactions")
 }
 }
-\keyword{internal}
