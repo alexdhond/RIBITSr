@@ -2,16 +2,18 @@
 % Please edit documentation in R/extractors.R
 \name{rb_extract_contacts}
 \alias{rb_extract_contacts}
-\title{Extract contacts from bank object}
+\title{Extract contacts from RIBITS data}
 \usage{
-rb_extract_contacts(bank)
+rb_extract_contacts(data)
 }
 \arguments{
-\item{bank}{A tibble returned by \code{rb_get_bank()}}
+\item{data}{A tibble returned by \verb{rb_get_*()} functions}
 }
 \value{
-A tibble containing contacts.
+A tibble containing contacts (may be empty if show_contacts = FALSE)
 }
 \description{
-Extract contacts from bank object
+Extracts all contact types. For specific contact types, use
+\code{rb_extract(data, "bank_pocs")}, \code{rb_extract(data, "bank_sponsors")}, etc.
 }
+\keyword{internal}

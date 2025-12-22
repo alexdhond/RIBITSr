@@ -2,16 +2,17 @@
 % Please edit documentation in R/extractors.R
 \name{rb_extract_sponsors}
 \alias{rb_extract_sponsors}
-\title{Extract sponsors from bank object}
+\title{Extract sponsors from RIBITS data}
 \usage{
-rb_extract_sponsors(bank)
+rb_extract_sponsors(data)
 }
 \arguments{
-\item{bank}{A tibble returned by \code{rb_get_bank()}}
+\item{data}{A tibble returned by \verb{rb_get_*()} functions}
 }
 \value{
-A tibble containing sponsors.
+A tibble
 }
 \description{
-Extract sponsors from bank object
+Extract sponsors from RIBITS data
 }
+\keyword{internal}

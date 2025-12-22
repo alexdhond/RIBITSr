@@ -1,0 +1,391 @@
+---
+title: "Workflow Examples"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{Workflow Examples}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>",
+  eval = FALSE
+)
+```
+
+This vignette demonstrates complete workflows for common RIBITS analysis tasks.
+
+## Workflow 1: State-Level Bank Analysis
+
+Analyze all mitigation banks in a state, including credit availability and transactions.
+
+```{r state-analysis}
+library(RIBITSr)
+library(dplyr)
+library(ggplot2)
+
+# Step 1: Get all banks in Oregon
+or_banks <- rb_get("banks", state = "OR")
+
+# Step 2: Summarize by status
+or_banks %>%
+  count(bank_status_name) %>%
+  arrange(desc(n))
+
+# Step 3: Get detailed data for approved banks
+approved_ids <- or_banks %>%
+  filter(bank_status_name == "Approved") %>%
+  pull(bank_id)
+
+# Step 4: Fetch ledgers for all approved banks
+or_ledgers <- rb_bulk_ledger(bank_ids = approved_ids)
+
+# Step 5: Analyze transaction patterns
+or_ledgers %>%
+  group_by(transaction_type) %>%
+  summarize(
+    n_transactions = n(),
+    total_credits = sum(credits, na.rm = TRUE)
+  )
+
+# Step 6: Credit availability over time
+or_ledgers %>%
+  filter(transaction_type == "Sell") %>%
+  mutate(year = lubridate::year(transaction_date)) %>%
+  group_by(year) %>%
+  summarize(credits_sold = sum(credits, na.rm = TRUE)) %>%
+  ggplot(aes(x = year, y = credits_sold)) +
+  geom_col() +
+  labs(title = "Oregon Bank Credits Sold by Year")
+```
+
+## Workflow 2: Spatial Analysis with EPA Data
+
+Combine RIBITS data with EPA spatial data for mapping.
+
+```{r spatial-analysis}
+library(RIBITSr)
+library(sf)
+library(ggplot2)
+
+# Step 1: Get California bank locations
+ca_banks <- rb_epa("banks", state = "CA")
+
+# Step 2: Get footprints for those banks
+ca_footprints <- rb_epa("footprints", state = "CA")
+
+# Step 3: Get service areas
+ca_service_areas <- rb_epa("service_areas", state = "CA")
+
+# Step 4: Map banks by type
+ggplot() +
+  geom_sf(data = ca_service_areas, fill = "lightblue", alpha = 0.3) +
+  geom_sf(data = ca_footprints, fill = "darkgreen", alpha = 0.5) +
+  geom_sf(data = ca_banks, aes(color = KIND_OF_BANK), size = 2) +
+  theme_minimal() +
+  labs(title = "California Mitigation Banks",
+       color = "Bank Type")
+
+# Step 5: Calculate service area coverage
+ca_service_areas %>%
+  mutate(area_sq_km = as.numeric(st_area(geometry)) / 1e6) %>%
+  summarize(total_coverage = sum(area_sq_km, na.rm = TRUE))
+```
+
+## Workflow 3: Credit Classification Analysis
+
+Analyze credit types and classifications across banks.
+
+```{r credit-classification}
+library(RIBITSr)
+library(dplyr)
+library(tidyr)
+
+# Step 1: Get banks in Portland district
+pdx_banks <- rb_get("banks", district = "Portland")
+
+# Step 2: Get credit classifications
+classifications <- rb_credit_classifications(bank_ids = pdx_banks$bank_id)
+
+# Step 3: Summarize by classification
+classifications %>%
+  group_by(credit_classification, jurisdiction) %>%
+  summarize(
+    n_banks = n_distinct(bank_id),
+    total_credits = sum(credits, na.rm = TRUE)
+  ) %>%
+  arrange(desc(total_credits))
+
+# Step 4: Pivot for comparison
+classifications %>%
+  group_by(bank_name, credit_classification) %>%
+  summarize(credits = sum(credits, na.rm = TRUE)) %>%
+  pivot_wider(names_from = credit_classification, values_from = credits)
+```
+
+## Workflow 4: Permittee and Permit Analysis
+
+Track who is purchasing credits and for which permits.
+
+```{r permittee-analysis}
+library(RIBITSr)
+library(dplyr)
+
+# Step 1: Get banks with ledger data
+bank_ids <- c(17, 100, 345, 500, 750)
+banks <- rb_get("banks", id = bank_ids, ledger = TRUE)
+
+# Step 2: Extract all ledgers
+all_ledgers <- purrr::map_dfr(banks, ~ rb_extract(.x, "ledger"))
+
+# Step 3: Filter to sales (credit purchases)
+sales <- all_ledgers %>%
+  filter(transaction_type == "Sell") %>%
+  select(bank_id, transaction_date, credits, permittee_name, permit_list)
+
+# Step 4: Top permittees by credits purchased
+sales %>%
+  group_by(permittee_name) %>%
+  summarize(
+    total_credits = sum(credits, na.rm = TRUE),
+    n_transactions = n()
+  ) %>%
+  arrange(desc(total_credits)) %>%
+  head(10)
+
+# Step 5: Permits over time
+sales %>%
+  mutate(year = lubridate::year(transaction_date)) %>%
+  count(year) %>%
+  ggplot(aes(x = year, y = n)) +
+  geom_line() +
+  labs(title = "Credit Sales Transactions by Year")
+```
+
+## Workflow 5: ILF Program Comparison
+
+Compare ILF programs across districts.
+
+```{r ilf-comparison}
+library(RIBITSr)
+library(dplyr)
+
+# Step 1: Get all ILF programs
+all_ilf <- rb_get("ilf")
+
+# Step 2: Compare by district
+all_ilf %>%
+  count(district, sort = TRUE)
+
+# Step 3: Get details for specific programs
+ca_ilf <- rb_get("ilf", state = "CA")
+ca_ilf_details <- rb_get("ilf", id = ca_ilf$program_id[1:5], 
+                          ledger = TRUE, service_area = TRUE)
+
+# Step 4: Analyze ILF transactions
+ilf_ledgers <- purrr::map_dfr(ca_ilf_details, ~ rb_extract(.x, "ledger"))
+
+ilf_ledgers %>%
+  group_by(transaction_type) %>%
+  summarize(total_credits = sum(credits, na.rm = TRUE))
+```
+
+## Workflow 6: Potential Credits by Mitigation Type
+
+This data requires manual download, but here's the complete workflow.
+
+```{r mitigation-type}
+library(RIBITSr)
+library(dplyr)
+
+# Step 1: Download the report (opens browser)
+# b <- rb_download("potential_credits")
+# In browser: Click Actions > Download > CSV
+# b$close()
+
+# Step 2: Read the downloaded file
+potential <- rb_read("potential_credits")
+
+# Step 3: Analyze mitigation methods
+potential %>%
+  group_by(mitigation_method) %>%
+  summarize(
+    n_banks = n_distinct(bank_id),
+    total_acres = sum(acres, na.rm = TRUE),
+    total_credits = sum(credits, na.rm = TRUE)
+  ) %>%
+  arrange(desc(total_credits))
+
+# Step 4: Compare establishment vs preservation
+potential %>%
+  filter(mitigation_method %in% c("Establishment", "Preservation")) %>%
+  group_by(mitigation_method, state) %>%
+  summarize(credits = sum(credits, na.rm = TRUE)) %>%
+  pivot_wider(names_from = mitigation_method, values_from = credits)
+```
+
+## Workflow 7: Finding Banks Near a Project Location
+
+Find available mitigation credits near a specific project site.
+
+```{r location-search}
+library(RIBITSr)
+library(dplyr)
+library(sf)
+
+# Step 1: Define project location (Portland, OR)
+project_lat <- 45.5152
+project_lon <- -122.6784
+
+# Step 2: Find nearby banks
+nearby <- rb_near(lat = project_lat, lon = project_lon, type = "banks")
+
+# Step 3: Get service areas to check coverage
+service_areas <- rb_epa("service_areas", bank_ids = nearby$bank_id)
+
+# Step 4: Check which service areas contain the project
+project_point <- st_sfc(st_point(c(project_lon, project_lat)), crs = 4326)
+
+covering_areas <- service_areas %>%
+  filter(st_contains(geometry, project_point, sparse = FALSE)[,1])
+
+# Step 5: Get bank details for covering areas
+if (nrow(covering_areas) > 0) {
+  available_banks <- rb_get("banks", id = covering_areas$BANK_ID, ledger = TRUE)
+  
+  # Check credit availability
+  purrr::map_dfr(available_banks, function(bank) {
+    ledger <- rb_extract(bank, "ledger")
+    tibble(
+      bank_id = bank$bank_id,
+      bank_name = bank$bank_name,
+      total_potential = sum(ledger$credits[ledger$transaction_type == "Init"], na.rm = TRUE),
+      total_sold = sum(ledger$credits[ledger$transaction_type == "Sell"], na.rm = TRUE),
+      available = total_potential - total_sold
+    )
+  })
+}
+```
+
+## Workflow 8: Complete Data Export
+
+Export all data for a set of banks to files.
+
+```{r export}
+library(RIBITSr)
+library(dplyr)
+library(sf)
+library(readr)
+
+# Step 1: Define banks to export
+bank_ids <- c(17, 100, 345, 500)
+
+# Step 2: Get full data
+banks <- rb_get("banks", id = bank_ids, 
+                ledger = TRUE, 
+                footprint = TRUE,
+                service_area = TRUE,
+                contacts = TRUE)
+
+# Step 3: Extract and save ledgers
+all_ledgers <- purrr::map_dfr(banks, ~ {
+  ledger <- rb_extract(.x, "ledger")
+  if (!is.null(ledger)) ledger$bank_id <- .x$bank_id
+  ledger
+})
+write_csv(all_ledgers, "output/ledgers.csv")
+
+# Step 4: Extract and save contacts
+all_contacts <- purrr::map_dfr(banks, ~ {
+  contacts <- rb_extract(.x, "contacts")
+  if (!is.null(contacts)) contacts$bank_id <- .x$bank_id
+  contacts
+})
+write_csv(all_contacts, "output/contacts.csv")
+
+# Step 5: Get and save spatial data
+footprints <- rb_epa("footprints", bank_ids = bank_ids)
+st_write(footprints, "output/footprints.gpkg")
+
+service_areas <- rb_epa("service_areas", bank_ids = bank_ids)
+st_write(service_areas, "output/service_areas.gpkg")
+```
+
+## Workflow 9: Automated Data Harmonization
+
+Use the built-in harmonization functions for consistent data.
+
+```{r harmonize}
+library(RIBITSr)
+
+# Step 1: Set up download directory
+rb_setup_download_dir("data/ribits_manual")
+
+# Step 2: Check what manual downloads are needed
+rb_download_status("data/ribits_manual")
+
+# Step 3: Download any missing reports
+# rb_download("potential_credits")
+# rb_download("credit_classification")
+
+# Step 4: Run auto-harmonization
+harmonized <- rb_auto_harmonize(
+  bank_ids = 1:100,
+  manual_download_dir = "data/ribits_manual"
+)
+
+# Step 5: Validate the harmonized data
+rb_validate_harmonized(harmonized)
+```
+
+## Tips and Best Practices
+
+### Performance
+
+```{r performance}
+# Use bulk operations when possible
+ledgers <- rb_bulk_ledger(bank_ids = 1:100)  # Better than loop
+
+# Cache expensive queries
+banks <- rb_get("banks", state = "CA")
+saveRDS(banks, "cache/ca_banks.rds")
+# Later: banks <- readRDS("cache/ca_banks.rds")
+```
+
+### Error Handling
+
+```{r error-handling}
+# Handle missing data gracefully
+safe_get <- function(bank_id) {
+  tryCatch({
+    rb_get("banks", id = bank_id, ledger = TRUE)
+  }, error = function(e) {
+    message("Failed to get bank ", bank_id, ": ", e$message)
+    NULL
+  })
+}
+
+# Get multiple banks with error handling
+banks <- purrr::map(bank_ids, safe_get) %>%
+  purrr::compact()  # Remove NULLs
+```
+
+### Memory Management
+
+```{r memory}
+# Process large datasets in chunks
+all_bank_ids <- rb_get("banks")$bank_id
+
+chunk_size <- 100
+results <- list()
+
+for (i in seq(1, length(all_bank_ids), by = chunk_size)) {
+  chunk_ids <- all_bank_ids[i:min(i + chunk_size - 1, length(all_bank_ids))]
+  results[[length(results) + 1]] <- rb_bulk_ledger(bank_ids = chunk_ids)
+  gc()  # Clean up memory
+}
+
+all_ledgers <- dplyr::bind_rows(results)
+```

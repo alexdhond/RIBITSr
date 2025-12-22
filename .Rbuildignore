@@ -1,2 +1,12 @@
 ^LICENSE\.md$
 ^README\.Rmd$
+^\.claude$
+^agents$
+^raw_script_files$
+^test_workflow\.R$
+^\.github$
+^_pkgdown\.yml$
+^tests/test_batch_performance\.R$
+^data/ribits_manual$
+^data/ribits_reports$
+^data/ribits_cache$

@@ -1,0 +1,277 @@
+---
+title: "Getting Started with RIBITSr"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{Getting Started with RIBITSr}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>",
+  eval = FALSE
+)
+```
+
+## Introduction
+
+RIBITSr provides a streamlined interface to the RIBITS (Regulatory In-lieu fee 
+and Bank Information Tracking System) API. RIBITS is the U.S. Army Corps of 
+Engineers' national database for tracking mitigation banks and in-lieu fee programs.
+This package allows you to:
+- Query mitigation banks, ILF programs, and umbrella instruments
+- Filter by state, district, status, and more
+- Access transaction ledgers, footprints, and service areas
+- Download spatial data from EPA's ArcGIS MapServer
+- Handle manual report downloads for data not available via API
+
+## Installation
+
+```{r install}
+# Install from GitHub
+devtools::install_github("alexdhond/RIBITSr")
+
+# Load the package
+library(RIBITSr)
+```
+
+## Quick Start: The Unified API
+
+RIBITSr provides four main functions that handle most use cases:
+
+| Function | Purpose |
+|----------|---------|
+| `rb_get()` | Get banks, ILF programs, umbrellas, or WQT projects |
+| `rb_epa()` | Get spatial data from EPA ArcGIS |
+| `rb_download_report()` | Download CSV reports directly (no browser needed) |
+| `rb_read()` | Read downloaded CSV files |
+
+### Exploring Available Options
+
+Each function shows help when called without arguments:
+
+```{r help}
+# See available data types and filters
+rb_get()
+
+# See available spatial layers
+rb_epa()
+
+# See available reports to download
+rb_report_types()
+
+# Read any CSV file (auto-detects type)
+data <- rb_read("path/to/file.csv")
+```
+
+## Querying Banks
+
+### List Banks with Filters
+
+```{r list-banks}
+# Get all Oregon banks
+or_banks <- rb_get("banks", state = "OR")
+head(or_banks)
+
+# Get banks in Sacramento district
+sac_banks <- rb_get("banks", district = "Sacramento")
+
+# Combine filters
+ca_approved <- rb_get("banks", 
+                       state = "CA", 
+                       status = "Approved",
+                       kind = "Standard")
+```
+
+### Available Filters
+
+| Filter | Description | Example Values |
+|--------|-------------|----------------|
+| `state` | State code | "CA", "OR", "TX" |
+| `district` | USACE district | "Portland", "Sacramento", "Galveston" |
+| `field_office` | FWS field office | "Oregon Fish and Wildlife Office" |
+| `noaa_region` | NOAA region | "West Coast" |
+| `kind` | Bank type | "Standard", "ILF", "Umbrella", "NRDA" |
+| `status` | Approval status | "Approved", "Pending", "Terminated" |
+
+### Get Detailed Bank Data
+
+When you need more than just the list, request specific data:
+
+```{r get-bank}
+# Get a single bank with ledger data
+bank <- rb_get("banks", id = 17, ledger = TRUE)
+
+# Get bank with all available data
+bank_full <- rb_get("banks", id = 17, 
+                    ledger = TRUE, 
+                    footprint = TRUE,
+                    service_area = TRUE,
+                    contacts = TRUE)
+
+# Get multiple banks at once
+banks <- rb_get("banks", id = c(17, 100, 345), ledger = TRUE)
+```
+
+### Data Options
+
+| Option | Description | Returns |
+|--------|-------------|---------|
+| `ledger = TRUE` | Transaction history | List of transactions |
+| `footprint = TRUE` | Bank footprint geometry | GeoJSON/sf object |
+| `service_area = TRUE` | Service area geometry | GeoJSON/sf object |
+| `contacts = TRUE` | Contact information | List of contacts |
+
+## Other Data Types
+
+### ILF Programs
+
+```{r ilf}
+# List California ILF programs
+ca_ilf <- rb_get("ilf", state = "CA")
+
+# Get specific ILF program with details
+ilf_program <- rb_get("ilf", id = 5, ledger = TRUE, service_area = TRUE)
+```
+
+### Umbrella Instruments
+
+```{r umbrellas}
+# List umbrella instruments in Portland district
+umbrellas <- rb_get("umbrellas", district = "Portland")
+
+# Get umbrella with full data
+umbrella <- rb_get("umbrellas", id = 10, ledger = TRUE)
+```
+
+### Water Quality Trading Projects
+
+```{r wqt}
+# List WQT projects
+wqt <- rb_get("wqt", state = "TX")
+```
+
+## Extracting Nested Data
+
+Bank responses contain nested data. Use `rb_extract()` to pull them out:
+```{r extract}
+# Get bank with nested data
+bank <- rb_get("banks", id = 17, ledger = TRUE, contacts = TRUE)
+
+# Extract ledger as a tibble
+ledger <- rb_extract(bank, "ledger")
+
+# Extract contacts
+contacts <- rb_extract(bank, "contacts")
+
+# Extract specific contact types
+sponsors <- rb_extract(bank, "sponsors")
+pocs <- rb_extract(bank, "pocs")
+```
+
+### Specialized Extractors
+
+```{r specialized}
+# Get credit classifications for multiple banks
+classifications <- rb_credit_classifications(bank_ids = c(17, 100, 345))
+
+# Get service area comments
+comments <- rb_service_area_comments(bank_ids = c(17, 100))
+
+# Bulk ledger extraction
+ledgers <- rb_bulk_ledger(bank_ids = 1:50)
+```
+
+## Spatial Data from EPA ArcGIS
+
+EPA maintains a mirror of RIBITS spatial data on their ArcGIS MapServer.
+
+```{r epa}
+# Get bank footprints for Oregon
+or_footprints <- rb_epa("footprints", state = "OR")
+
+# Get service areas for specific banks
+service_areas <- rb_epa("service_areas", bank_ids = c(17, 100))
+
+# Get ILF program service areas
+ilf_areas <- rb_epa("ilf_service_areas")
+
+# Get USACE district boundaries
+districts <- rb_epa("districts")
+```
+
+### Available Layers
+
+| Layer | Description |
+|-------|-------------|
+| `banks` | Bank point locations (approved) |
+| `footprints` | Bank footprint polygons |
+| `service_areas` | Bank service area polygons |
+| `ilf_programs` | ILF program point locations |
+| `ilf_service_areas` | ILF program service areas |
+| `districts` | USACE district boundaries |
+
+## Location-Based Queries
+
+Find banks or programs near a specific location:
+
+```{r near}
+# Find banks near Portland, OR
+nearby_banks <- rb_near(lat = 45.5152, lon = -122.6784, type = "banks")
+
+# Find ILF programs near the same location
+nearby_programs <- rb_near(lat = 45.5152, lon = -122.6784, type = "programs")
+```
+
+## Manual Downloads
+
+Some data is only available through manual download from the RIBITS website.
+RIBITSr provides helpers to streamline this process.
+
+### Download Reports
+
+```{r download}
+# Open browser to Potential Credits report
+b <- rb_download("potential_credits")
+# In browser: Click Actions > Download > CSV
+# When done:
+b$close()
+
+# Other available reports
+rb_download("credit_classification")
+rb_download("credit_tracking")
+rb_download("credit_withdrawal")
+rb_download("bank_summary")
+```
+
+### Read Downloaded Files
+
+```{r read}
+# Read the downloaded CSV (auto-detects latest file)
+potential <- rb_read("potential_credits")
+
+# Read specific file
+cc <- rb_read("credit_classification", file = "path/to/file.csv")
+```
+
+## Data Availability Summary
+
+| Data | API | Manual Download |
+|------|-----|-----------------|
+| Bank metadata & list | ✓ | |
+| Ledger transactions | ✓ | |
+| Credit classification | ✓ | |
+| Permittee/permit info | ✓ | |
+| Service area comments | ✓ | |
+| Footprint geometry | ✓ | |
+| Service area geometry | ✓ | |
+| **Mitigation type breakdown** | ✗ | ✓ |
+| Transfer tracking details | | ✓ |
+
+## Next Steps
+
+- See `vignette("workflow-examples")` for complete analysis workflows
+- See `vignette("api-reference")` for detailed API documentation
+- See `data-raw/api_reference.md` for complete field reference

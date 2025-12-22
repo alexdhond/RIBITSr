@@ -1,7 +1,7 @@
 test_that("check_ribits_connection returns TRUE when API is reachable", {
   skip_on_cran()
 
-  httptest2::with_mock_dir("ribits_connection_success", {
+  httptest2::with_mock_dir("mock_conn_ok", {
     result <- check_ribits_connection()
 
     expect_type(result, "logical")
@@ -12,7 +12,7 @@ test_that("check_ribits_connection returns TRUE when API is reachable", {
 test_that("check_ribits_connection returns FALSE on connection error", {
   skip_on_cran()
 
-  httptest2::with_mock_dir("ribits_connection_error", {
+  httptest2::with_mock_dir("mock_conn_err", {
     # Mock a failed request
     result <- check_ribits_connection()
 
@@ -23,7 +23,7 @@ test_that("check_ribits_connection returns FALSE on connection error", {
 test_that("check_ribits_connection respects timeout parameter", {
   skip_on_cran()
 
-  httptest2::with_mock_dir("ribits_connection_timeout", {
+  httptest2::with_mock_dir("mock_conn_to", {
     result <- check_ribits_connection(timeout = 5)
 
     expect_type(result, "logical")
@@ -33,7 +33,7 @@ test_that("check_ribits_connection respects timeout parameter", {
 test_that("check_ribits_connection verbose parameter works", {
   skip_on_cran()
 
-  httptest2::with_mock_dir("ribits_connection_verbose", {
+  httptest2::with_mock_dir("mock_conn_verb", {
     # Capture output when verbose = TRUE
     expect_message(
       check_ribits_connection(verbose = TRUE),
@@ -45,7 +45,7 @@ test_that("check_ribits_connection verbose parameter works", {
 test_that("check_ribits_connection handles invalid responses", {
   skip_on_cran()
 
-  httptest2::with_mock_dir("ribits_connection_invalid", {
+  httptest2::with_mock_dir("mock_conn_inv", {
     result <- check_ribits_connection()
 
     expect_type(result, "logical")

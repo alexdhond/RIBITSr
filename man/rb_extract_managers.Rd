@@ -2,16 +2,17 @@
 % Please edit documentation in R/extractors.R
 \name{rb_extract_managers}
 \alias{rb_extract_managers}
-\title{Extract managers from bank object}
+\title{Extract managers from RIBITS data}
 \usage{
-rb_extract_managers(bank)
+rb_extract_managers(data)
 }
 \arguments{
-\item{bank}{A tibble returned by \code{rb_get_bank()}}
+\item{data}{A tibble returned by \verb{rb_get_*()} functions}
 }
 \value{
-A tibble containing managers.
+A tibble
 }
 \description{
-Extract managers from bank object
+Extract managers from RIBITS data
 }
+\keyword{internal}

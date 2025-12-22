@@ -161,49 +161,60 @@
 
 ---
 
-## Data NOT Available via API
+## Data Available via API (Updated December 2025)
 
-Based on comparison with manual CSV downloads:
+**IMPORTANT:** The API returns MORE data than previously documented. Many fields
+listed as "manual-only" are actually available via the API.
 
-### 1. Credit Classification by Jurisdiction
-**Available via:** Manual download → "Credit Classification" report
+### Ledger Fields (15 fields - ALL available via API)
 
-Fields not in API:
-- Detailed breakdown by credit type (wetland, stream, species)
-- Credits by jurisdiction
-- Available/withdrawn/released/potential by classification
+| Field | Description | Previously Thought |
+|-------|-------------|-------------------|
+| `TRANSACTION_ID` | Unique transaction ID | ✅ Known |
+| `TRANSACTION_TYPE` | Init/Rel/Wdr | ✅ Known |
+| `TRANSACTION_DATE` | Date of transaction | ✅ Known |
+| `JURISDICTION` | Federal/State | ✅ Known |
+| `CREDITS` | Number of credits | ✅ Known |
+| `ACRES` | Acres involved | ✅ Known |
+| `CREDIT_TYPE_LIST` | Wetland/Stream/etc | ✅ Known |
+| `CREDIT_CLASSIFICATION` | Classification type | ❌ Was "manual-only" |
+| `COMMENT` | Transaction notes | ✅ Known |
+| `IS_TRANSFERRED` | Transfer flag | ✅ Known |
+| `IS_PURCHASED` | Purchase flag | ✅ Known |
+| `PERMITTEE` | Who purchased credits | ❌ Was "manual-only" |
+| `PERMIT_LIST` | Associated permits | ❌ Was "manual-only" |
+| `IMPACT_HUC` | Impact watershed | ❌ Was "manual-only" |
+| `IMPACT_QUANTITY` | Impact amount | ❌ Was "manual-only" |
 
-### 2. Potential Credits by Mitigation Type  
+### Service Area Comments (Available via API)
+
+The `COMMENTS` field at the bank level contains service area comments!
+Use `rb_service_area_comments()` to extract.
+
+---
+
+## Data Still Requiring Manual Download
+
+### 1. Potential Credits by Mitigation Type
 **Available via:** Manual download → "Potential Credits by Mitigation Type" report
 
 Fields not in API:
-- Credits by mitigation method:
-  - Establishment
-  - Re-establishment
-  - Rehabilitation
-  - Preservation
-  - Enhancement
-  - Uplands (Buffer)
+- Credits by mitigation method (Establishment, Re-establishment, Rehabilitation, 
+  Preservation, Enhancement, Uplands/Buffer)
 - Initial acres/feet by method
 
-### 3. Detailed Transaction/Permittee Data
+### 2. Transfer Tracking Details
 **Available via:** Manual download → "Credit Tracking" report
 
-Fields not in API ledger:
-- `permittee` - Who purchased credits
-- `permit_number` - Associated permit
-- `project_name` - What project used the credits
+Fields not in API:
 - `credits_purchased_from_bank` vs `credits_fulfilled_at_site`
 - `date_purchased_from_bank` vs `date_fulfilled_at_site`
 - `is_blm_program_or_blm_project_site`
 - `accepted_in_settlement`
 
-### 4. Service Area Comments
-**Available via:** Manual download → "Service Area Comments" report
-
 ---
 
-## API vs Manual Download: When to Use Each
+## API vs Manual Download: When to Use Each (Updated Dec 2025)
 
 | Data Need | Use API | Use Manual Download |
 |-----------|---------|---------------------|
@@ -212,13 +223,15 @@ Fields not in API ledger:
 | Bank footprint geometries | ✅ | |
 | Service area geometries | ✅ | |
 | Contact information | ✅ | |
-| Basic ledger (credits released/withdrawn) | ✅ | |
+| **Full ledger with all fields** | ✅ | |
+| **Credit classification** | ✅ | |
+| **Permittee/permit details** | ✅ | |
+| **Impact HUC** | ✅ | |
+| **Service area comments** | ✅ | |
 | ILF program structure | ✅ | |
 | Umbrella instrument structure | ✅ | |
-| Credit type breakdown by jurisdiction | | ✅ |
 | Credits by mitigation method | | ✅ |
-| Permittee/permit details for transactions | | ✅ |
-| Service area comments | | ✅ |
+| Transfer tracking details | | ✅ |
 
 ---
 

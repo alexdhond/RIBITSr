@@ -4,15 +4,17 @@
 \alias{rb_request}
 \title{Make a request to the RIBITS API}
 \usage{
-rb_request(endpoint, params = list())
+rb_request(endpoint, params = list(), description = NULL)
 }
 \arguments{
 \item{endpoint}{The API endpoint (e.g., "bank_site_list/")}
 
 \item{params}{A named list of query parameters}
+
+\item{description}{Description for progress/error messages}
 }
 \value{
-A httr2 response object
+A httr2 response object, or NULL if request failed
 }
 \description{
 Make a request to the RIBITS API

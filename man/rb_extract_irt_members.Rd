@@ -2,16 +2,17 @@
 % Please edit documentation in R/extractors.R
 \name{rb_extract_irt_members}
 \alias{rb_extract_irt_members}
-\title{Extract IRT members from bank object}
+\title{Extract IRT members from RIBITS data}
 \usage{
-rb_extract_irt_members(bank)
+rb_extract_irt_members(data)
 }
 \arguments{
-\item{bank}{A tibble returned by \code{rb_get_bank()}}
+\item{data}{A tibble returned by \verb{rb_get_*()} functions}
 }
 \value{
-A tibble containing IRT members.
+A tibble
 }
 \description{
-Extract IRT members from bank object
+Extract IRT members from RIBITS data
 }
+\keyword{internal}

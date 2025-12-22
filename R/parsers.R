@@ -1,101 +1,92 @@
-#' Read Bank Summary CSV
-#'
-#' Reads and cleans the "Bank Summary" CSV file manually downloaded from RIBITS.
-#'
-#' @param path Path to the CSV file.
-#' @return A tibble.
-#' @export
-rb_read_bank_summary <- function(path) {
-  if (!file.exists(path)) {
-    rlang::abort(paste("File not found:", path))
-  }
-  readr::read_csv(path, show_col_types = FALSE) |>
-    janitor::clean_names()
-}
+# R/parsers.R
+# Unified CSV reading functions for RIBITS reports
 
-#' Read Credit Classification CSV
+#' Read RIBITS CSV Report
 #'
-#' Reads and cleans the "Credit Classification by Jurisdiction" CSV file.
+#' Unified function to read any RIBITS CSV report. Automatically handles
+#' different report formats including the complex "Potential Credits" report.
 #'
 #' @param path Path to the CSV file.
+#' @param type Optional. Report type for special parsing. Usually auto-detected.
+#'   Special types: "potential_credits" (requires hierarchical parsing).
 #' @return A tibble.
-#' @export
-rb_read_credit_classification <- function(path) {
-  if (!file.exists(path)) {
-    rlang::abort(paste("File not found:", path))
-  }
-  readr::read_csv(path, show_col_types = FALSE) |>
-    janitor::clean_names()
-}
-
-#' Read Credit Tracking CSV
-#'
-#' Reads and cleans the "Bank and ILF Program Credit Tracking" CSV file.
-#'
-#' @param path Path to the CSV file.
-#' @return A tibble.
-#' @export
-rb_read_credit_tracking <- function(path) {
-  if (!file.exists(path)) {
-    rlang::abort(paste("File not found:", path))
-  }
-  readr::read_csv(path, show_col_types = FALSE) |>
-    janitor::clean_names()
-}
-
-#' Read Service Area Comments CSV
-#'
-#' Reads and cleans the "Service Area Comments" CSV file.
-#'
-#' @param path Path to the CSV file.
-#' @return A tibble.
-#' @export
-rb_read_service_area_comments <- function(path) {
-  if (!file.exists(path)) {
-    rlang::abort(paste("File not found:", path))
-  }
-  readr::read_csv(path, show_col_types = FALSE) |>
-    janitor::clean_names()
-}
-
-#' Read Credit Withdrawal CSV
-#'
-#' Reads and cleans the "Bank and ILF Program Credit Withdrawal" CSV file.
-#'
-#' @param path Path to the CSV file.
-#' @return A tibble.
-#' @export
-rb_read_credit_withdrawal <- function(path) {
-  if (!file.exists(path)) {
-    rlang::abort(paste("File not found:", path))
-  }
-  readr::read_csv(path, show_col_types = FALSE) |>
-    janitor::clean_names()
-}
-
-#' Read Potential Credits by Mitigation Type CSV
-#'
-#' Parses the "Potential Credits by Mitigation Type" CSV file downloaded from
-#' RIBITS. This file has a complex hierarchical structure with nested headers
-#' and subtotals that require special handling.
-#'
-#' The function performs a two-pass parse:
-#' 1. First pass: Identifies hierarchical context (District, Resource, Method)
-#' 2. Second pass: Filters out non-data rows and parses the clean data
-#'
-#' @param path Path to the CSV file.
-#' @return A tibble with columns: district_name, reported_bank_count,
-#'   reported_status, resource_type, mitigation_method, bank_name,
-#'   credit_classification, potential_credits, init_acres, init_feet.
 #' @export
 #' @examples
 #' \dontrun{
-#' # Read and parse potential credits file
-#' pot_credits <- rb_read_potential_credits(
-#'   "Potential Credits by Mitigation Type 2025_11_19.csv"
-#' )
+#' # Read any standard report
+#' data <- rb_read("path/to/report.csv")
+#'
+#' # Read potential credits (auto-detected from filename)
+#' pot <- rb_read("Potential Credits by Mitigation Type.csv")
 #' }
-rb_read_potential_credits <- function(path) {
+rb_read <- function(path, type = NULL) {
+  if (!file.exists(path)) {
+    rlang::abort(paste("File not found:", path))
+  }
+  
+ # Auto-detect type from filename if not specified
+  if (is.null(type)) {
+    filename <- tolower(basename(path))
+    if (grepl("potential.?credit", filename)) {
+      type <- "potential_credits"
+    }
+  }
+  
+  # Special parsing for potential credits
+  if (!is.null(type) && type == "potential_credits") {
+    return(.rb_read_potential_credits(path))
+  }
+  
+  # Standard CSV parsing
+  .rb_read_generic_csv(path)
+}
+
+#' Generic CSV Reader (internal)
+#' 
+#' Handles RIBITS CSV quirks like empty first rows and inconsistent headers.
+#' @keywords internal
+#' @noRd
+.rb_read_generic_csv <- function(path) {
+  tryCatch({
+    # Read first few lines to detect format
+    first_lines <- readr::read_lines(path, n_max = 5)
+    
+    # Check if first line is empty or just commas (RIBITS quirk)
+    first_line_empty <- nchar(gsub(",", "", first_lines[1])) == 0
+    
+    skip_rows <- 0
+    if (first_line_empty && length(first_lines) > 1) {
+      # Check if second line looks like headers (contains text)
+      if (nchar(gsub(",", "", first_lines[2])) > 0) {
+        skip_rows <- 1
+      }
+    }
+    
+    # Read CSV with appropriate skip
+    data <- readr::read_csv(path, skip = skip_rows, show_col_types = FALSE)
+    
+    # Note: We preserve original column names here - clean_names() is applied at final output
+    
+    # Try to extract bank_id from name if not present
+    if (!"bank_id" %in% names(data) && "name" %in% names(data)) {
+      # Many RIBITS names contain the bank ID in parentheses at end
+      # e.g., "Some Bank Name (123)"
+      data <- data |>
+        dplyr::mutate(
+          bank_id = as.integer(stringr::str_extract(.data$name, "\\d+$"))
+        )
+    }
+    
+    data
+  }, error = function(e) {
+    rlang::abort(paste("Failed to parse CSV:", e$message))
+  })
+}
+
+#' Read Potential Credits (internal)
+#' @keywords internal
+#' @noRd
+.rb_read_potential_credits <- function(path) {
   if (!file.exists(path)) {
     rlang::abort(paste("File not found:", path))
   }

@@ -2,16 +2,17 @@
 % Please edit documentation in R/extractors.R
 \name{rb_extract_ledger}
 \alias{rb_extract_ledger}
-\title{Extract ledger from bank object}
+\title{Extract ledger from RIBITS data}
 \usage{
-rb_extract_ledger(bank)
+rb_extract_ledger(data)
 }
 \arguments{
-\item{bank}{A tibble returned by \code{rb_get_bank()}}
+\item{data}{A tibble returned by \verb{rb_get_*()} functions}
 }
 \value{
-A tibble containing the ledger, or an empty tibble if not found.
+A tibble containing the ledger
 }
 \description{
-Extract ledger from bank object
+Convenience wrapper for \code{rb_extract(data, "ledger")}.
 }
+\keyword{internal}

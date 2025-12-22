@@ -2,16 +2,17 @@
 % Please edit documentation in R/extractors.R
 \name{rb_extract_pocs}
 \alias{rb_extract_pocs}
-\title{Extract POCs from bank object}
+\title{Extract POCs from RIBITS data}
 \usage{
-rb_extract_pocs(bank)
+rb_extract_pocs(data)
 }
 \arguments{
-\item{bank}{A tibble returned by \code{rb_get_bank()}}
+\item{data}{A tibble returned by \verb{rb_get_*()} functions}
 }
 \value{
-A tibble containing POCs.
+A tibble
 }
 \description{
-Extract POCs from bank object
+Extract POCs from RIBITS data
 }
+\keyword{internal}

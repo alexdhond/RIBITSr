@@ -1,0 +1,55 @@
+url: https://alexdhond.github.io/RIBITSr
+template:
+  bootstrap: 5
+  bootswatch: flatly
+
+navbar:
+  structure:
+    left:  [intro, reference, articles, news]
+    right: [github]
+
+reference:
+  - title: Simple API (Recommended)
+    desc: High-level functions that automatically harmonize data from multiple sources.
+    contents:
+      - rb_banks
+      - rb_ilf_programs
+      - rb_umbrellas
+      - rb_transactions
+
+  - title: Advanced API
+    desc: Flexible functions for specific data retrieval needs.
+    contents:
+      - rb_get
+      - rb_epa
+      - rb_near
+      - rb_download_report
+      - rb_read
+
+  - title: Data Extraction & Utilities
+    desc: Tools for working with RIBITS data objects.
+    contents:
+      - rb_extract
+      - rb_bulk_ledger
+      - rb_preview
+      - rb_columns
+      - rb_csv_info
+      - rb_csv_structure
+      - check_ribits_connection
+
+  - title: Data Quality & Metadata
+    desc: Tools for assessing data quality and coverage.
+    contents:
+      - discrepancies
+      - rb_quality_report
+      - rb_coverage
+      - rb_catalog
+      - rb_credit_breakdown
+
+  - title: Network & Configuration
+    desc: Configuration for API interaction and resilience.
+    contents:
+      - rb_network_config
+      - rb_network_failures
+      - rb_checkpoints
+      - rb_clear_checkpoints
