@@ -6,6 +6,11 @@
 \usage{
 \method{print}{ribits_transactions}(x, ...)
 }
+\arguments{
+\item{x}{A ribits_transactions object}
+
+\item{...}{Additional arguments passed to methods}
+}
 \description{
 Print method for ribits_transactions
 }

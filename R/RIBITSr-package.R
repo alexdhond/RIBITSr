@@ -14,11 +14,11 @@
 #' Use these functions for most tasks:
 #' \describe{
 #'   \item{\code{\link{rb_banks}}}{Get all bank data (auto-harmonized)}
-#'   \item{\code{\link{rb_credits}}}{Get credit tracking/classification data}
+#'   \item{\code{\link{rb_transactions}}}{Get credit tracking/classification data}
 #'   \item{\code{\link{rb_ilf_programs}}}{Get ILF program data}
 #'   \item{\code{\link{rb_umbrellas}}}{Get umbrella instrument data}
 #' }
-#'
+
 #' @section Quick Start:
 #' \preformatted{
 #' # Get California banks (all sources, auto-harmonized)
@@ -29,8 +29,8 @@
 #' ca$ledger        # Transaction history
 #' ca$footprints    # Spatial data
 #'
-#' # Get credit data
-#' credits <- rb_credits(state = "CA")
+#' # Get transaction data
+#' txns <- rb_transactions(state = "CA")
 #'
 #' # Check data quality
 #' ca$.meta$discrepancies

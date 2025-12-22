@@ -245,6 +245,8 @@ rb_transactions <- function(bank_ids = NULL,
 
 
 #' Print method for ribits_transactions
+#' @param x A ribits_transactions object
+#' @param ... Additional arguments passed to methods
 #' @export
 print.ribits_transactions <- function(x, ...) {
   cli::cli_h1("RIBITS Transaction Data")
