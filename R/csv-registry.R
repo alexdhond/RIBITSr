@@ -10,6 +10,7 @@
 #' \describe{
 #'   \item{type}{Report type identifier}
 #'   \item{name}{Human-readable name}
+#'   \item{page}{Oracle APEX Page ID for download}
 #'   \item{grain}{Data granularity: "bank", "program", "transaction", "credit"}
 #'   \item{entity}{Primary entity type: "bank", "ilf_program", "umbrella"}
 #'   \item{id_col}{Column containing entity identifier}
@@ -27,6 +28,7 @@ CSV_REPORT_REGISTRY <- list(
   banks_sites = list(
     type = "banks_sites",
     name = "Banks & Sites",
+    page = 158,
     grain = "bank",
     entity = "bank",
     id_col = "name",
@@ -43,6 +45,7 @@ CSV_REPORT_REGISTRY <- list(
   ilf_programs = list(
     type = "ilf_programs",
     name = "ILF Programs",
+    page = 47,
     grain = "program",
     entity = "ilf_program",
     id_col = "program_name",
@@ -58,6 +61,7 @@ CSV_REPORT_REGISTRY <- list(
   ilf_summary = list(
     type = "ilf_summary",
     name = "ILF Program Summary",
+    page = 209,
     grain = "program",
     entity = "ilf_program",
     id_col = "program_name",
@@ -76,6 +80,7 @@ CSV_REPORT_REGISTRY <- list(
   umbrellas = list(
     type = "umbrellas",
     name = "Umbrella Instruments",
+    page = 401,
     grain = "umbrella",
     entity = "umbrella",
     id_col = "umbrella_name",
@@ -95,6 +100,7 @@ CSV_REPORT_REGISTRY <- list(
   credit_classification = list(
     type = "credit_classification",
     name = "Credit Classification (Approved)",
+    page = 206,
     grain = "credit_class",
     entity = "bank",
     id_col = "bank_name",
@@ -115,6 +121,7 @@ CSV_REPORT_REGISTRY <- list(
   credit_releases = list(
     type = "credit_releases",
     name = "Credit Releases (Next 5 Years)",
+    page = 208,
     grain = "release",
     entity = "bank",
     id_col = "bank_name",
@@ -132,6 +139,7 @@ CSV_REPORT_REGISTRY <- list(
   ledger_transactions = list(
     type = "ledger_transactions",
     name = "Ledger Transactions (Primary)",
+    page = 490,
     grain = "transaction",
     entity = "bank",
     id_col = "name",
@@ -151,6 +159,7 @@ CSV_REPORT_REGISTRY <- list(
   transactions_watershed = list(
     type = "transactions_watershed",
     name = "Transactions by Watershed",
+    page = 491,
     grain = "transaction",
     entity = "bank",
     id_col = "name",
@@ -172,6 +181,7 @@ CSV_REPORT_REGISTRY <- list(
   public_notices = list(
     type = "public_notices",
     name = "Public Notices",
+    page = 622,
     grain = "notice",
     entity = "bank",
     id_col = "bank_name",
@@ -189,6 +199,7 @@ CSV_REPORT_REGISTRY <- list(
   available_credits_huc = list(
     type = "available_credits_huc",
     name = "Available Credits (HUC8)",
+    page = 6,
     grain = "huc",
     entity = "geographic",
     id_col = NA,
@@ -198,6 +209,30 @@ CSV_REPORT_REGISTRY <- list(
       "HUC columns" = "Watershed identifiers",
       "Credit columns" = "Available credits by type"
     )
+  ),
+  
+  nrda_projects = list(
+    type = "nrda_projects",
+    name = "NRDA Projects",
+    page = 620,
+    grain = "project",
+    entity = "nrda_project",
+    id_col = "project_name",
+    description = "Natural Resource Damage Assessment projects.",
+    merge_safe = TRUE,
+    key_columns = c("project_name", "trustees", "status")
+  ),
+
+  blm_projects = list(
+    type = "blm_projects",
+    name = "BLM Projects & Programs",
+    page = 701,
+    grain = "project",
+    entity = "blm_project",
+    id_col = "project_name",
+    description = "Bureau of Land Management projects.",
+    merge_safe = TRUE,
+    key_columns = c("project_name", "status")
   )
 )
 
@@ -276,7 +311,8 @@ For detailed credit data:
     type = names(CSV_REPORT_REGISTRY),
     name = sapply(CSV_REPORT_REGISTRY, function(x) x$name),
     grain = sapply(CSV_REPORT_REGISTRY, function(x) x$grain),
-    merge_safe = sapply(CSV_REPORT_REGISTRY, function(x) isTRUE(x$merge_safe))
+    merge_safe = sapply(CSV_REPORT_REGISTRY, function(x) isTRUE(x$merge_safe)),
+    page_id = sapply(CSV_REPORT_REGISTRY, function(x) x$page)
   ))
 }
 

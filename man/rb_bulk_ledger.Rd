@@ -55,4 +55,3 @@ ledger <- rb_bulk_ledger(state = "CA")  # Resumes from checkpoint
 rb_checkpoints()
 }
 }
-\keyword{internal}

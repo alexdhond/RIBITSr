@@ -9,6 +9,7 @@ A list with report metadata:
 \describe{
 \item{type}{Report type identifier}
 \item{name}{Human-readable name}
+\item{page}{Oracle APEX Page ID for download}
 \item{grain}{Data granularity: "bank", "program", "transaction", "credit"}
 \item{entity}{Primary entity type: "bank", "ilf_program", "umbrella"}
 \item{id_col}{Column containing entity identifier}

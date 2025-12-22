@@ -12,7 +12,7 @@ rb_download_report(
 )
 }
 \arguments{
-\item{report_type}{Character. The type of report to download. See Details.}
+\item{report_type}{Character. The type of report to download. See \code{rb_report_types()}.}
 
 \item{download_dir}{Directory to save the file. Default "data/ribits_reports".}
 
@@ -26,22 +26,6 @@ The path to the downloaded CSV file.
 \description{
 Downloads a CSV report directly from RIBITS using the Oracle APEX API.
 This function bypasses the need for a browser or manual navigation.
-}
-\details{
-Available report types:
-\itemize{
-\item \code{banks_sites} - All Banks and Sites
-\item \code{ilf_programs} - In-Lieu Fee Programs
-\item \code{umbrellas} - Umbrella Instruments
-\item \code{public_notices} - Public Notices
-\item \code{credit_classification} - Credit Classification by Jurisdiction (Approved)
-\item \code{credit_releases} - Anticipated Credit Releases (Next 5 Years)
-\item \code{available_credits_huc} - Available Credits by HUC8
-\item \code{ledger_transactions} - Bank & ILF Program Ledger Transactions
-\item \code{ilf_summary} - ILF Program Summary
-\item \code{nrda_projects} - NRDA Projects
-\item \code{blm_projects} - BLM Projects & Programs
-}
 }
 \examples{
 \dontrun{
