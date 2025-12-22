@@ -31,11 +31,11 @@ bank <- rb_get("banks", id = 17, ledger = TRUE, footprint = TRUE)
 # Query EPA spatial data
 footprints <- rb_epa("footprints", state = "CA")
 
-# Download manual report (opens browser)
-rb_download("potential_credits")
+# Download manual report directly
+file <- rb_download_report("potential_credits")
 
 # Read downloaded CSV
-data <- rb_read("credit_classification")
+data <- rb_read(file)
 ```
 
 ---
@@ -99,10 +99,10 @@ rb_epa(
 | `ilf_service_areas` | ILF program service areas |
 | `districts` | USACE district boundaries |
 
-### `rb_download()` - Download Reports via Browser
+### `rb_download_report()` - Download Reports via Browser
 
 ```r
-rb_download(
+rb_download_report(
   report = NULL,         # Report type (see below)
   download_dir = "data/ribits_manual"
 )
@@ -295,18 +295,18 @@ These reports require manual download (not available via API):
 
 ### Potential Credits by Mitigation Type
 - **What**: Breakdown of credits by mitigation method (Establishment, Preservation, Enhancement, etc.)
-- **Download**: `rb_download("potential_credits")`
+- **Download**: `rb_download_report("potential_credits")`
 - **Read**: `rb_read("potential_credits")`
 
 ### Credit Classification (also available via API)
 - **What**: Credits by type and jurisdiction
-- **API**: `rb_credit_classifications()` or extract from ledger
-- **Download**: `rb_download("credit_classification")`
+- **API**: `rb_transactions()` or extract from ledger
+- **Download**: `rb_download_report("credit_classification")`
 
 ### Credit Tracking
 - **What**: Detailed transaction records with permittee info
 - **API**: Most data available via `rb_get("banks", id = X, ledger = TRUE)`
-- **Download**: `rb_download("credit_tracking")`
+- **Download**: `rb_download_report("credit_tracking")`
 
 ---
 
@@ -318,7 +318,7 @@ These reports require manual download (not available via API):
 # See what's available
 rb_get()
 rb_epa()
-rb_download()
+rb_download_report()
 ```
 
 ### 2. Query Banks with Filters
@@ -341,7 +341,7 @@ bank <- rb_get("banks", id = 17,
 ledger <- rb_extract(bank, "ledger")
 
 # Extract credit classifications
-classifications <- rb_credit_classifications(bank_ids = c(17, 100))
+classifications <- rb_transactions(bank_ids = c(17, 100))
 
 # Extract service area comments
 comments <- rb_service_area_comments(bank_ids = c(17, 100))
@@ -361,7 +361,7 @@ ilf_areas <- rb_epa("ilf_service_areas")
 
 ```r
 # Open browser for Potential Credits (mitigation type breakdown)
-b <- rb_download("potential_credits")
+b <- rb_download_report("potential_credits")
 # Click: Actions > Download > CSV
 b$close()
 
@@ -389,7 +389,7 @@ banks <- rb_get("banks", id = c(17, 100, 345, 500), ledger = TRUE)
 |----------|---------|
 | `rb_get()` | Get any RIBITS data with filters |
 | `rb_epa()` | Get EPA ArcGIS spatial data |
-| `rb_download()` | Download manual reports |
+| `rb_download_report()` | Download manual reports |
 | `rb_read()` | Read downloaded CSVs |
 | `rb_near()` | Find banks/programs by location |
 
@@ -398,7 +398,7 @@ banks <- rb_get("banks", id = c(17, 100, 345, 500), ledger = TRUE)
 | Function | Purpose |
 |----------|---------|
 | `rb_extract()` | Extract nested data from bank |
-| `rb_credit_classifications()` | Get credit classifications |
+| `rb_transactions()` | Get credit classifications |
 | `rb_service_area_comments()` | Get service area comments |
 | `rb_bulk_ledger()` | Get ledgers for multiple banks |
 
@@ -409,7 +409,7 @@ banks <- rb_get("banks", id = c(17, 100, 345, 500), ledger = TRUE)
 | `rb_list_banks()` | `rb_get("banks")` |
 | `rb_get_bank()` | `rb_get("banks", id = X)` |
 | `rb_epa_footprints()` | `rb_epa("footprints")` |
-| `rb_download_potential_credits()` | `rb_download("potential_credits")` |
+| `rb_download_potential_credits()` | `rb_download_report("potential_credits")` |
 
 ---
 

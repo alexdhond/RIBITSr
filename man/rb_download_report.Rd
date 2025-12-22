@@ -12,7 +12,7 @@ rb_download_report(
 )
 }
 \arguments{
-\item{report_type}{Character. The type of report to download. See \code{rb_report_types()}.}
+\item{report_type}{Character. The type of report to download. See \code{rb_reports()}.}
 
 \item{download_dir}{Directory to save the file. If NULL (default), uses a temporary directory.}
 

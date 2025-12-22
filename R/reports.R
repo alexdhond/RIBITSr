@@ -6,7 +6,7 @@
 #' Downloads a CSV report directly from RIBITS using the Oracle APEX API.
 #' This function bypasses the need for a browser or manual navigation.
 #'
-#' @param report_type Character. The type of report to download. See `rb_report_types()`.
+#' @param report_type Character. The type of report to download. See `rb_reports()`.
 #' @param download_dir Directory to save the file. If NULL (default), uses a temporary directory.
 #' @param filename Optional custom filename. If NULL, generates one based on report name and date.
 #' @param reset_filters Logical. If TRUE (default), attempts to reset report filters to default (RIR).

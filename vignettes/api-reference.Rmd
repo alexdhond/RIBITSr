@@ -76,14 +76,14 @@ Download RIBITS reports programmatically (no browser needed):
 
 ```{r rb-download}
 rb_download_report(
-  report_type,           # Report type (see rb_report_types())
+  report_type,           # Report type (see rb_reports())
   download_dir = "data/ribits_reports",
   filename = NULL,       # Auto-generated if NULL
   reset_filters = TRUE   # Reset report filters to get all data
 )
 
 # See available reports
-rb_report_types()
+rb_reports()
 
 # Examples
 rb_download_report("banks_sites", download_dir = "data/")
@@ -166,7 +166,7 @@ These functions still work but the unified API is recommended.
 | `rb_get_ilf_program(5)` | `rb_get("ilf", id = 5)` |
 | `rb_epa_footprints()` | `rb_epa("footprints")` |
 | `rb_epa_banks()` | `rb_epa("banks")` |
-| `rb_download_potential_credits()` | `rb_download("potential_credits")` |
+| `rb_download_potential_credits()` | `rb_download_report("potential_credits")` |
 
 ## RIBITS API Endpoints
 
@@ -311,12 +311,12 @@ Returned by `rb_extract(bank, "ledger")`:
 
 | Report | Description | API Alternative |
 |--------|-------------|-----------------|
-| Credit Classification | Credits by type/jurisdiction | `rb_get_report_data()` |
+| Credit Classification | Credits by type/jurisdiction | `rb_transactions()` |
 | Potential Credits | Credits by mitigation method | **None - Manual only** |
 | Credit Tracking | Transaction details | `rb_get(..., ledger = TRUE)` |
 | Credit Withdrawal | Withdrawal details | Partial via ledger |
 | Bank Summary | Bank overview | `rb_get("banks")` |
-| Service Area Comments | Service area notes | `rb_get_report_data()` |
+| Service Area Comments | Service area notes | Included in bank details |
 
 ### Report URLs
 

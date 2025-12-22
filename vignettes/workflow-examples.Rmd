@@ -106,11 +106,11 @@ library(tidyr)
 # Step 1: Get banks in Portland district
 pdx_banks <- rb_get("banks", district = "Portland")
 
-# Step 2: Get credit classifications
-classifications <- rb_credit_classifications(bank_ids = pdx_banks$bank_id)
+# Step 2: Get transaction data with credit breakdown
+transactions <- rb_transactions(bank_ids = pdx_banks$bank_id)
 
 # Step 3: Summarize by classification
-classifications %>%
+transactions$transactions %>%
   group_by(credit_classification, jurisdiction) %>%
   summarize(
     n_banks = n_distinct(bank_id),
@@ -118,11 +118,8 @@ classifications %>%
   ) %>%
   arrange(desc(total_credits))
 
-# Step 4: Pivot for comparison
-classifications %>%
-  group_by(bank_name, credit_classification) %>%
-  summarize(credits = sum(credits, na.rm = TRUE)) %>%
-  pivot_wider(names_from = credit_classification, values_from = credits)
+# Step 4: Use credit breakdown function
+credit_summary <- rb_credit_breakdown(bank_ids = pdx_banks$bank_id[1:10])
 ```
 
 ## Workflow 4: Permittee and Permit Analysis
@@ -200,13 +197,11 @@ This data requires manual download, but here's the complete workflow.
 library(RIBITSr)
 library(dplyr)
 
-# Step 1: Download the report (opens browser)
-# b <- rb_download("potential_credits")
-# In browser: Click Actions > Download > CSV
-# b$close()
+# Step 1: Download the report directly
+file_path <- rb_download_report("potential_credits", download_dir = "data/")
 
 # Step 2: Read the downloaded file
-potential <- rb_read("potential_credits")
+potential <- rb_read(file_path)
 
 # Step 3: Analyze mitigation methods
 potential %>%
@@ -313,31 +308,29 @@ service_areas <- rb_epa("service_areas", bank_ids = bank_ids)
 st_write(service_areas, "output/service_areas.gpkg")
 ```
 
-## Workflow 9: Automated Data Harmonization
+## Workflow 9: Multi-Source Data Harmonization
 
-Use the built-in harmonization functions for consistent data.
+Use the `ribits()` function to automatically harmonize data from multiple sources.
 
 ```{r harmonize}
 library(RIBITSr)
 
-# Step 1: Set up download directory
-rb_setup_download_dir("data/ribits_manual")
+# Get Oregon banks with automatic harmonization from all sources
+or_data <- ribits(state = "OR", ledger = TRUE, spatial = TRUE)
 
-# Step 2: Check what manual downloads are needed
-rb_download_status("data/ribits_manual")
+# Access different components
+or_data$banks          # Bank summary data
+or_data$ledger         # Transaction history
+or_data$footprints     # Spatial footprints
+or_data$service_areas  # Service areas
 
-# Step 3: Download any missing reports
-# rb_download("potential_credits")
-# rb_download("credit_classification")
+# Check metadata
+or_data$.meta$sources  # Which sources were used
+or_data$.meta$discrepancies  # Any conflicts between sources
 
-# Step 4: Run auto-harmonization
-harmonized <- rb_auto_harmonize(
-  bank_ids = 1:100,
-  manual_download_dir = "data/ribits_manual"
-)
-
-# Step 5: Validate the harmonized data
-rb_validate_harmonized(harmonized)
+# Use specific sources only
+api_only <- ribits(state = "CA", sources = "api")
+epa_only <- ribits(state = "CA", sources = "epa")
 ```
 
 ## Tips and Best Practices

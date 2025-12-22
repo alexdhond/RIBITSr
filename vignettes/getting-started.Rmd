@@ -60,7 +60,7 @@ rb_get()
 rb_epa()
 
 # See available reports to download
-rb_report_types()
+rb_reports()
 
 # Read any CSV file (auto-detects type)
 data <- rb_read("path/to/file.csv")
@@ -171,14 +171,14 @@ sponsors <- rb_extract(bank, "sponsors")
 pocs <- rb_extract(bank, "pocs")
 ```
 
-### Specialized Extractors
+### Bulk Extraction
 
-```{r specialized}
-# Get credit classifications (from report)
-classifications <- rb_get_report_data("credit_classification")
-
+```{r bulk}
 # Bulk ledger extraction (from API)
 ledgers <- rb_bulk_ledger(bank_ids = 1:50)
+
+# Get transaction data (harmonized from multiple sources)
+transactions <- rb_transactions(bank_ids = c(17, 100, 345))
 ```
 
 ## Spatial Data from EPA ArcGIS
@@ -237,7 +237,7 @@ file_path <- rb_download_report("potential_credits")
 rb_download_report("credit_classification", download_dir = "data/")
 
 # See all available report types
-rb_report_types()
+rb_reports()
 ```
 
 ### Read Downloaded Files
@@ -246,8 +246,8 @@ rb_report_types()
 # Read the downloaded file (auto-detects type)
 potential <- rb_read(file_path)
 
-# Or download and read in one step (with caching)
-credits <- rb_get_report_data("credit_classification")
+# Read any downloaded CSV report
+credits <- rb_read("data/credit_classification.csv")
 ```
 
 ## Data Availability Summary

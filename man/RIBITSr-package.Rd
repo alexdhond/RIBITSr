@@ -74,7 +74,7 @@ Useful links:
 
 }
 \author{
-\strong{Maintainer}: Alexander D'Hond \email{alex@example.com}
+\strong{Maintainer}: Alexander Dhond \email{alexander.k.dhond@gmail.com}
 
 }
 \keyword{internal}
