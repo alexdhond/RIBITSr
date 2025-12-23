@@ -31,12 +31,17 @@
   }
 
   # Initialize result
+  # Architecture: Query ALL sources, combine/harmonize, fill gaps, detect discrepancies
+  # Only report missing data if truly missing from ALL sources
   result <- structure(
     list(
-      banks = NULL,
-      ledger = NULL,
-      footprints = NULL,
-      service_areas = NULL,
+      banks = NULL,           # Summary: API + EPA + CSV merged
+      ledger = NULL,          # Transactions: API + CSV harmonized
+      credit_summary = NULL,  # Credit classification: CSV
+      contacts = NULL,        # Sponsors/POCs/managers: API only
+      footprints = NULL,      # Spatial: EPA + API fallback
+      service_areas = NULL,   # Spatial: EPA + API fallback
+      geometry = NULL,        # Unified spatial layer
       .meta = list(
         fetch_date = Sys.Date(),
         fetch_timestamp = start_time,
@@ -361,6 +366,46 @@
   }
 
   # ==========================================================================
+  # Step 2b: Get contacts data (API only - sponsors, POCs, managers)
+  # ==========================================================================
+  if (use_api && length(query_ids) <= 50) {
+    # Only fetch contacts for small queries (API is slow for contacts)
+    if (!quietly) cli::cli_progress_step("Fetching contacts from API...")
+    contacts_list <- list()
+    
+    for (bid in query_ids[1:min(length(query_ids), 20)]) {  # Limit to first 20
+      tryCatch({
+        bd <- rb_get("banks", id = bid, contacts = TRUE, ledger = FALSE,
+                     footprint = FALSE, service_area = FALSE)
+        if (!is.null(bd$sponsors) && nrow(bd$sponsors) > 0) {
+          bd$sponsors$bank_id <- bid
+          bd$sponsors$contact_type <- "sponsor"
+          contacts_list[[length(contacts_list) + 1]] <- bd$sponsors
+        }
+        if (!is.null(bd$pocs) && nrow(bd$pocs) > 0) {
+          bd$pocs$bank_id <- bid
+          bd$pocs$contact_type <- "poc"
+          contacts_list[[length(contacts_list) + 1]] <- bd$pocs
+        }
+        if (!is.null(bd$managers) && nrow(bd$managers) > 0) {
+          bd$managers$bank_id <- bid
+          bd$managers$contact_type <- "manager"
+          contacts_list[[length(contacts_list) + 1]] <- bd$managers
+        }
+      }, error = function(e) NULL)
+      Sys.sleep(0.05)
+    }
+    
+    if (length(contacts_list) > 0) {
+      result$contacts <- tryCatch(dplyr::bind_rows(contacts_list), error = function(e) NULL)
+      if (!is.null(result$contacts) && nrow(result$contacts) > 0) {
+        result$.meta$sources$contacts <- "ribits_api"
+        if (!quietly) cli::cli_alert_success("{nrow(result$contacts)} contacts from API")
+      }
+    }
+  }
+
+  # ==========================================================================
   # Step 3: Get spatial data (harmonized from both sources)
   # ==========================================================================
   if (include_spatial) {
@@ -468,10 +513,50 @@
       result$.meta$sources$footprints <- "epa_arcgis + ribits_api"
     }
 
-    # Service areas (EPA ArcGIS is primary)
-    if (!is.null(epa_service_areas) && nrow(epa_service_areas) > 0) {
-      result$service_areas <- epa_service_areas
-      result$.meta$sources$service_areas <- "epa_arcgis"
+    # Service areas (EPA ArcGIS + API fallback)
+    # Get API service areas for banks missing from EPA
+    epa_sa_ids <- if (!is.null(epa_service_areas) && nrow(epa_service_areas) > 0) {
+      sa_id_col <- names(epa_service_areas)[tolower(names(epa_service_areas)) == "bank_id"][1]
+      if (!is.na(sa_id_col)) epa_service_areas[[sa_id_col]] else integer()
+    } else integer()
+    missing_sa_ids <- setdiff(query_ids, epa_sa_ids)
+    
+    ribits_service_areas <- NULL
+    if (use_api && length(missing_sa_ids) > 0 && length(missing_sa_ids) <= 30) {
+      if (!quietly) cli::cli_progress_step("Fetching {length(missing_sa_ids)} service areas from API...")
+      ribits_sa_list <- list()
+      for (bid in missing_sa_ids) {
+        tryCatch({
+          bd <- rb_get("banks", id = bid, service_area = TRUE, footprint = FALSE,
+                       ledger = FALSE, contacts = FALSE)
+          if (!is.null(bd$service_area) && nrow(bd$service_area) > 0) {
+            sa <- bd$service_area
+            sa$source <- "ribits_api"
+            sa$bank_id <- bid
+            ribits_sa_list[[length(ribits_sa_list) + 1]] <- sa
+          }
+        }, error = function(e) NULL)
+        Sys.sleep(0.05)
+      }
+      if (length(ribits_sa_list) > 0) {
+        ribits_service_areas <- dplyr::bind_rows(ribits_sa_list)
+        if (!quietly) cli::cli_alert_success("{nrow(ribits_service_areas)} service areas from API")
+      }
+    }
+    
+    # Combine service areas
+    if (!is.null(epa_service_areas) || !is.null(ribits_service_areas)) {
+      all_sa <- list()
+      if (!is.null(epa_service_areas) && nrow(epa_service_areas) > 0) {
+        all_sa[[1]] <- epa_service_areas
+      }
+      if (!is.null(ribits_service_areas) && nrow(ribits_service_areas) > 0) {
+        all_sa[[length(all_sa) + 1]] <- ribits_service_areas
+      }
+      if (length(all_sa) > 0) {
+        result$service_areas <- tryCatch(dplyr::bind_rows(all_sa), error = function(e) all_sa[[1]])
+        result$.meta$sources$service_areas <- "epa_arcgis + ribits_api"
+      }
     }
 
     if (!quietly) {
@@ -497,6 +582,56 @@
   }
   if (!is.null(result$service_areas) && nrow(result$service_areas) > 0) {
     result$service_areas <- janitor::clean_names(result$service_areas)
+  }
+  
+  # ==========================================================================
+  # Create unified geometry layer combining all spatial data
+  # ==========================================================================
+  if (include_spatial) {
+    geom_layers <- list()
+    
+    # Add centroids from banks data (if geometry available in EPA data)
+    if (!is.null(result$banks) && nrow(result$banks) > 0) {
+      # Check for centroid column (from API location data)
+      if ("bank_location_centroid" %in% names(result$banks)) {
+        centroids <- result$banks |>
+          dplyr::select(dplyr::any_of(c("bank_id", "name", "bank_status"))) |>
+          dplyr::mutate(geometry_type = "centroid")
+        # Note: centroids are in bank_location_centroid as GeoJSON strings
+        # Would need to parse - for now skip as EPA points layer is better
+      }
+    }
+    
+    # Add footprints
+    if (!is.null(result$footprints) && nrow(result$footprints) > 0 && 
+        inherits(result$footprints, "sf")) {
+      fp <- result$footprints |>
+        dplyr::mutate(geometry_type = "footprint") |>
+        dplyr::select(dplyr::any_of(c("bank_id", "bank_name", "name", "bank_status", 
+                                       "geometry_type", "source")), geometry)
+      geom_layers[["footprints"]] <- fp
+    }
+    
+    # Add service areas
+    if (!is.null(result$service_areas) && nrow(result$service_areas) > 0 && 
+        inherits(result$service_areas, "sf")) {
+      sa <- result$service_areas |>
+        dplyr::mutate(geometry_type = "service_area") |>
+        dplyr::select(dplyr::any_of(c("bank_id", "bank_name", "name", "bank_status", 
+                                       "geometry_type", "source")), geometry)
+      geom_layers[["service_areas"]] <- sa
+    }
+    
+    # Combine into unified geometry layer
+    if (length(geom_layers) > 0) {
+      result$geometry <- tryCatch({
+        combined <- dplyr::bind_rows(geom_layers)
+        janitor::clean_names(combined)
+      }, error = function(e) {
+        # Fallback: just use footprints if binding fails
+        if (!is.null(geom_layers[["footprints"]])) geom_layers[["footprints"]] else NULL
+      })
+    }
   }
   
   result$.meta$timing$completed <- Sys.time()

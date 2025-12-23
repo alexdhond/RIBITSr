@@ -600,10 +600,49 @@ rb_export_discrepancies <- function(data, file_path = "ribits_discrepancies.csv"
   if (is.null(df2) || nrow(df2) == 0) return(df1)
  
   # Normalize column names to lowercase for consistent merging
-  # (clean_names will be applied at final output)
   names(df1) <- tolower(names(df1))
   names(df2) <- tolower(names(df2))
   by <- tolower(by)
+  
+  # Define semantic equivalents (columns that mean the same thing)
+  # Format: canonical_name = c(alternative_names)
+  semantic_equivalents <- list(
+    name = c("bank_name", "program_name", "umbrella_name"),
+    bank_status = c("bank_status_2"),
+    bank_type = c("bank_type_2", "kind_of_bank"),
+    state_abbrev_list = c("state_list"),
+    year_bank_approved = c("year_established")
+  )
+  
+  # Rename equivalent columns in df2 to match df1's canonical names
+  for (canonical in names(semantic_equivalents)) {
+    alts <- semantic_equivalents[[canonical]]
+    # If df1 has canonical but df2 has an alternative, rename df2's alt
+    if (canonical %in% names(df1)) {
+      for (alt in alts) {
+        if (alt %in% names(df2) && !(canonical %in% names(df2))) {
+          names(df2)[names(df2) == alt] <- canonical
+        } else if (alt %in% names(df2) && canonical %in% names(df2)) {
+          # Both exist - drop the alternative to avoid duplication
+          df2 <- df2 |> dplyr::select(-dplyr::all_of(alt))
+        }
+      }
+    }
+  }
+  
+  # Remove columns that are just logical indicators for nested data
+  # (these indicate presence of data, not actual data)
+  logical_indicator_cols <- c("bank_footprint", "service_areas", "bank_sponsors", 
+                               "bank_pocs", "bank_managers", "bank_irt_members",
+                               "bank_other_contacts", "ledger")
+  for (col in logical_indicator_cols) {
+    if (col %in% names(df1) && is.logical(df1[[col]])) {
+      df1 <- df1 |> dplyr::select(-dplyr::all_of(col))
+    }
+    if (col %in% names(df2) && is.logical(df2[[col]])) {
+      df2 <- df2 |> dplyr::select(-dplyr::all_of(col))
+    }
+  }
   
   # Ensure join column exists in both
   if (!all(by %in% names(df1)) || !all(by %in% names(df2))) {

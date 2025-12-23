@@ -64,7 +64,35 @@ rb_epa_query <- function(layer,
 
   layer_id <- EPA_LAYERS[[layer]]
 
-  # Build WHERE clause
+  # Handle large bank_id lists by chunking (EPA has URL length limits)
+  # If more than 50 bank_ids, chunk and combine results
+  if (!is.null(bank_ids) && length(bank_ids) > 50) {
+    chunks <- split(bank_ids, ceiling(seq_along(bank_ids) / 50))
+    all_results <- list()
+    
+    for (i in seq_along(chunks)) {
+      chunk_result <- rb_epa_query(
+        layer = layer,
+        where = where,
+        bank_ids = chunks[[i]],
+        out_fields = out_fields,
+        return_geometry = return_geometry
+      )
+      if (!is.null(chunk_result) && nrow(chunk_result) > 0) {
+        all_results[[i]] <- chunk_result
+      }
+      Sys.sleep(0.1)  # Be polite to the server
+    }
+    
+    if (length(all_results) > 0) {
+      combined <- do.call(rbind, all_results)
+      return(combined)
+    } else {
+      return(sf::st_sf(geometry = sf::st_sfc()))
+    }
+  }
+
+  # Build WHERE clause for normal-sized requests
   if (!is.null(bank_ids)) {
     bank_filter <- paste0("BANK_ID IN (", paste(bank_ids, collapse = ","), ")")
     if (where == "1=1") {
