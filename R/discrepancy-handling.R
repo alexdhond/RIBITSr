@@ -606,8 +606,9 @@ rb_export_discrepancies <- function(data, file_path = "ribits_discrepancies.csv"
   
   # Define semantic equivalents (columns that mean the same thing)
   # Format: canonical_name = c(alternative_names)
+  # Use type-specific names as canonical (bank_name for banks, not generic "name")
   semantic_equivalents <- list(
-    name = c("bank_name", "program_name", "umbrella_name"),
+    bank_name = c("name"),
     bank_status = c("bank_status_2"),
     bank_type = c("bank_type_2", "kind_of_bank"),
     state_abbrev_list = c("state_list"),

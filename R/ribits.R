@@ -559,6 +559,13 @@
   # Standardize column names across all data components (single point of normalization)
   if (!is.null(result$banks) && nrow(result$banks) > 0) {
     result$banks <- janitor::clean_names(result$banks)
+    # Coalesce name columns into bank_name (type-specific naming)
+    if ("bank_name" %in% names(result$banks) && "name" %in% names(result$banks)) {
+      result$banks$bank_name <- dplyr::coalesce(result$banks$bank_name, result$banks$name)
+      result$banks <- result$banks |> dplyr::select(-name)
+    } else if ("name" %in% names(result$banks) && !("bank_name" %in% names(result$banks))) {
+      names(result$banks)[names(result$banks) == "name"] <- "bank_name"
+    }
   }
   if (!is.null(result$ledger) && nrow(result$ledger) > 0) {
     result$ledger <- janitor::clean_names(result$ledger)
@@ -576,9 +583,23 @@
   if (include_spatial) {
     geom_layers <- list()
     
+    # Helper to coalesce name columns into bank_name
+    .coalesce_name <- function(df) {
+      if ("bank_name" %in% names(df) && "name" %in% names(df)) {
+        df$bank_name <- dplyr::coalesce(df$bank_name, df$name)
+        df <- df |> dplyr::select(-name)
+      } else if ("name" %in% names(df) && !("bank_name" %in% names(df))) {
+        names(df)[names(df) == "name"] <- "bank_name"
+      }
+      df
+    }
+    
     # 1. Add centroids from bank_location_centroid (GeoJSON strings in banks data)
     if (!is.null(result$banks) && nrow(result$banks) > 0 && 
         "bank_location_centroid" %in% names(result$banks)) {
+      # Get bank_name column (could be bank_name or name after clean_names)
+      name_col <- if ("bank_name" %in% names(result$banks)) "bank_name" else "name"
+      
       centroids_list <- list()
       for (i in seq_len(nrow(result$banks))) {
         centroid_json <- result$banks$bank_location_centroid[i]
@@ -587,7 +608,7 @@
             pt <- sf::st_read(centroid_json, quiet = TRUE, drivers = "GeoJSON")
             if (nrow(pt) > 0) {
               pt$bank_id <- result$banks$bank_id[i]
-              pt$name <- result$banks$name[i]
+              pt$bank_name <- result$banks[[name_col]][i]
               pt$bank_status <- result$banks$bank_status[i]
               pt$geometry_type <- "centroid"
               pt$source <- "ribits_api"
@@ -600,7 +621,8 @@
         centroids <- do.call(rbind, centroids_list)
         centroids <- sf::st_set_geometry(centroids, "geometry")
         geom_layers[["centroids"]] <- centroids |>
-          dplyr::select(dplyr::any_of(c("bank_id", "name", "bank_status", "geometry_type", "source")), geometry)
+          dplyr::select(dplyr::any_of(c("bank_id", "bank_name", "bank_status", 
+                                         "geometry_type", "source")), geometry)
       }
     }
     
@@ -609,8 +631,9 @@
         inherits(footprints_data, "sf")) {
       fp <- footprints_data |>
         janitor::clean_names() |>
+        .coalesce_name() |>
         dplyr::mutate(geometry_type = "footprint") |>
-        dplyr::select(dplyr::any_of(c("bank_id", "bank_name", "name", "bank_status", 
+        dplyr::select(dplyr::any_of(c("bank_id", "bank_name", "bank_status", 
                                        "geometry_type", "source")), geometry)
       geom_layers[["footprints"]] <- fp
     }
@@ -620,8 +643,9 @@
         inherits(service_areas_data, "sf")) {
       sa <- service_areas_data |>
         janitor::clean_names() |>
+        .coalesce_name() |>
         dplyr::mutate(geometry_type = "service_area") |>
-        dplyr::select(dplyr::any_of(c("bank_id", "bank_name", "name", "bank_status", 
+        dplyr::select(dplyr::any_of(c("bank_id", "bank_name", "bank_status", 
                                        "geometry_type", "source")), geometry)
       geom_layers[["service_areas"]] <- sa
     }
@@ -630,9 +654,34 @@
     if (length(geom_layers) > 0) {
       result$geometry <- tryCatch({
         combined <- dplyr::bind_rows(geom_layers)
-        janitor::clean_names(combined)
+        combined <- janitor::clean_names(combined)
+        
+        # Fill missing bank_name and bank_status from banks lookup
+        if (!is.null(result$banks) && "bank_id" %in% names(combined)) {
+          bank_lookup <- result$banks |> 
+            dplyr::select(dplyr::any_of(c("bank_id", "bank_name", "bank_status"))) |>
+            dplyr::distinct()
+          
+          # Fill missing bank_name
+          if ("bank_name" %in% names(bank_lookup) && "bank_name" %in% names(combined)) {
+            missing_idx <- is.na(combined$bank_name)
+            if (any(missing_idx)) {
+              combined$bank_name[missing_idx] <- bank_lookup$bank_name[
+                match(combined$bank_id[missing_idx], bank_lookup$bank_id)]
+            }
+          }
+          
+          # Fill missing bank_status
+          if ("bank_status" %in% names(bank_lookup) && "bank_status" %in% names(combined)) {
+            missing_idx <- is.na(combined$bank_status)
+            if (any(missing_idx)) {
+              combined$bank_status[missing_idx] <- bank_lookup$bank_status[
+                match(combined$bank_id[missing_idx], bank_lookup$bank_id)]
+            }
+          }
+        }
+        combined
       }, error = function(e) {
-        # Fallback: return first available layer
         geom_layers[[1]]
       })
     }

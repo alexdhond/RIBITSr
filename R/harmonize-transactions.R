@@ -12,6 +12,8 @@
 #' @param state Optional state filter
 #' @param district Optional district filter
 #' @param sources Which sources to use. Default all: c("api", "csv")
+#' @param priority Optional. Source priority for column conflicts ("api" or "csv").
+#'   If NULL, uses global config from rb_discrepancy_config().
 #' @param include_credit_class Include credit classification summary? Default TRUE.
 #' @param progress Show progress. Default TRUE.
 #' @param cache_dir Directory for CSV cache. Default tempdir().
@@ -35,6 +37,7 @@ rb_transactions <- function(bank_ids = NULL,
                             state = NULL,
                             district = NULL,
                             sources = c("api", "csv"),
+                            priority = NULL,
                             include_credit_class = TRUE,
                             progress = TRUE,
                             cache_dir = NULL) {
@@ -133,7 +136,7 @@ rb_transactions <- function(bank_ids = NULL,
   # === Merge Transaction Data ===
   if (progress) cli::cli_progress_step("Harmonizing transaction data...")
   
-  transactions <- .harmonize_transactions(api_ledger, csv_ledger)
+  transactions <- .harmonize_transactions(api_ledger, csv_ledger, priority = priority)
   
   if (!is.null(transactions) && nrow(transactions) > 0) {
     result$transactions <- transactions
@@ -204,7 +207,7 @@ rb_transactions <- function(bank_ids = NULL,
 
 #' Harmonize transaction data from multiple sources
 #' @keywords internal
-.harmonize_transactions <- function(api_ledger, csv_ledger) {
+.harmonize_transactions <- function(api_ledger, csv_ledger, priority = NULL) {
   
   if (is.null(api_ledger) && is.null(csv_ledger)) {
     return(tibble::tibble())
@@ -212,6 +215,18 @@ rb_transactions <- function(bank_ids = NULL,
   
   if (is.null(api_ledger) || nrow(api_ledger) == 0) return(csv_ledger)
   if (is.null(csv_ledger) || nrow(csv_ledger) == 0) return(api_ledger)
+  
+  # Determine priority
+  if (is.null(priority)) {
+    config <- .get_discrepancy_config()
+    # Find first relevant source in priority list
+    p_sources <- config$source_priority
+    if ("csv" %in% p_sources && "api" %in% p_sources) {
+      priority <- if (match("csv", p_sources) < match("api", p_sources)) "csv" else "api"
+    } else {
+      priority <- "api" # Default fallback
+    }
+  }
   
   # Standardize API ledger columns
   api_std <- api_ledger |>
@@ -238,7 +253,7 @@ rb_transactions <- function(bank_ids = NULL,
   csv_char <- csv_std |> dplyr::mutate(dplyr::across(dplyr::everything(), as.character))
   
   # Gap-filling strategy: For transactions that exist in both sources,
-  # coalesce fields (API takes priority, CSV fills gaps)
+  # coalesce fields based on priority
   if ("transaction_id" %in% names(api_char) && "transaction_id" %in% names(csv_char)) {
     # Find transactions in both sources
     api_ids <- api_char$transaction_id[!is.na(api_char$transaction_id)]
@@ -261,22 +276,31 @@ rb_transactions <- function(bank_ids = NULL,
         csv_common[[col]] <- NA_character_
       }
       
-      # Join and coalesce (API priority, CSV fills gaps)
+      # Join (keeping api as left to preserve row order initially, but we'll coalesce carefully)
       merged_common <- dplyr::left_join(
         api_common, csv_common, 
         by = "transaction_id", 
         suffix = c("", "_csv")
       )
       
-      # Coalesce each column
+      # Coalesce each column based on priority
       for (col in all_cols) {
         if (col == "transaction_id") next
+        
         csv_col <- paste0(col, "_csv")
+        
         if (csv_col %in% names(merged_common)) {
-          merged_common[[col]] <- dplyr::coalesce(
-            merged_common[[col]], 
-            merged_common[[csv_col]]
-          )
+          # Define values
+          val_api <- merged_common[[col]]
+          val_csv <- merged_common[[csv_col]]
+          
+          # Coalesce
+          if (priority == "csv") {
+             merged_common[[col]] <- dplyr::coalesce(val_csv, val_api)
+          } else {
+             merged_common[[col]] <- dplyr::coalesce(val_api, val_csv)
+          }
+          
           merged_common <- merged_common |> dplyr::select(-dplyr::all_of(csv_col))
         }
       }
@@ -302,7 +326,7 @@ rb_transactions <- function(bank_ids = NULL,
   # Final deduplication by transaction_id (for any remaining duplicates)
   if ("transaction_id" %in% names(combined) && any(!is.na(combined$transaction_id))) {
     combined <- combined |>
-      dplyr::arrange(transaction_id, dplyr::desc(source == "api+csv"), dplyr::desc(source == "api")) |>
+      dplyr::arrange(transaction_id, dplyr::desc(source == "api+csv"), dplyr::desc(source == priority)) |>
       dplyr::distinct(transaction_id, .keep_all = TRUE)
   }
   
