@@ -218,10 +218,17 @@ rb_transactions <- function(bank_ids = NULL,
     dplyr::rename_with(~ gsub("_list$", "", .x))  # credit_type_list -> credit_type
   
   # Standardize CSV ledger columns
+  # NOTE: CSV "type" = "Bank"/"Program" (entity type), NOT transaction type!
+  # CSV has different structure: sub_ledger_id, permit_auth_date, credit_action
+  # CSV uses parent_transaction_id to link to API transactions
   csv_std <- csv_ledger |>
     dplyr::rename_with(~ dplyr::case_when(
       .x == "name" ~ "bank_name",
-      .x == "type" ~ "transaction_type", 
+      .x == "type" ~ "entity_type",
+      .x == "parent_transaction_id" ~ "transaction_id",
+      .x == "sub_ledger_id" ~ "sub_ledger_id",
+      .x == "permit_auth_date" ~ "permit_auth_date",
+      .x == "credit_action" ~ "credit_action",
       .x == "comment" ~ "notes",
       TRUE ~ .x
     ))
@@ -230,14 +237,118 @@ rb_transactions <- function(bank_ids = NULL,
   api_char <- api_std |> dplyr::mutate(dplyr::across(dplyr::everything(), as.character))
   csv_char <- csv_std |> dplyr::mutate(dplyr::across(dplyr::everything(), as.character))
   
-  # Combine
-  combined <- dplyr::bind_rows(api_char, csv_char)
+  # Gap-filling strategy: For transactions that exist in both sources,
+  # coalesce fields (API takes priority, CSV fills gaps)
+  if ("transaction_id" %in% names(api_char) && "transaction_id" %in% names(csv_char)) {
+    # Find transactions in both sources
+    api_ids <- api_char$transaction_id[!is.na(api_char$transaction_id)]
+    csv_ids <- csv_char$transaction_id[!is.na(csv_char$transaction_id)]
+    common_ids <- intersect(api_ids, csv_ids)
+    
+    if (length(common_ids) > 0) {
+      # For common transactions, merge and coalesce
+      api_common <- api_char |> dplyr::filter(transaction_id %in% common_ids)
+      csv_common <- csv_char |> dplyr::filter(transaction_id %in% common_ids)
+      
+      # Get all unique columns
+      all_cols <- union(names(api_common), names(csv_common))
+      
+      # Add missing columns to each
+      for (col in setdiff(all_cols, names(api_common))) {
+        api_common[[col]] <- NA_character_
+      }
+      for (col in setdiff(all_cols, names(csv_common))) {
+        csv_common[[col]] <- NA_character_
+      }
+      
+      # Join and coalesce (API priority, CSV fills gaps)
+      merged_common <- dplyr::left_join(
+        api_common, csv_common, 
+        by = "transaction_id", 
+        suffix = c("", "_csv")
+      )
+      
+      # Coalesce each column
+      for (col in all_cols) {
+        if (col == "transaction_id") next
+        csv_col <- paste0(col, "_csv")
+        if (csv_col %in% names(merged_common)) {
+          merged_common[[col]] <- dplyr::coalesce(
+            merged_common[[col]], 
+            merged_common[[csv_col]]
+          )
+          merged_common <- merged_common |> dplyr::select(-dplyr::all_of(csv_col))
+        }
+      }
+      
+      # Mark source as combined
+      merged_common$source <- "api+csv"
+      
+      # Get transactions unique to each source
+      api_only <- api_char |> dplyr::filter(!transaction_id %in% common_ids | is.na(transaction_id))
+      csv_only <- csv_char |> dplyr::filter(!transaction_id %in% common_ids | is.na(transaction_id))
+      
+      # Combine all
+      combined <- dplyr::bind_rows(merged_common, api_only, csv_only)
+    } else {
+      # No common transactions, just bind
+      combined <- dplyr::bind_rows(api_char, csv_char)
+    }
+  } else {
+    # No transaction_id to match on, just bind
+    combined <- dplyr::bind_rows(api_char, csv_char)
+  }
   
-  # Deduplicate by transaction_id if present, keeping API version
+  # Final deduplication by transaction_id (for any remaining duplicates)
   if ("transaction_id" %in% names(combined) && any(!is.na(combined$transaction_id))) {
     combined <- combined |>
-      dplyr::arrange(transaction_id, dplyr::desc(source == "api")) |>
+      dplyr::arrange(transaction_id, dplyr::desc(source == "api+csv"), dplyr::desc(source == "api")) |>
       dplyr::distinct(transaction_id, .keep_all = TRUE)
+  }
+  
+  # Fill bank_name gaps using bank_id lookup
+  # API has bank_id but not bank_name; CSV has bank_name but needs bank_id matching
+  if ("bank_id" %in% names(combined)) {
+    # First try: Build bank_id -> bank_name mapping from rows that have both
+    if ("bank_name" %in% names(combined)) {
+      known_names <- combined |>
+        dplyr::filter(!is.na(bank_id) & !is.na(bank_name)) |>
+        dplyr::select(bank_id, bank_name) |>
+        dplyr::distinct(bank_id, .keep_all = TRUE)
+      
+      if (nrow(known_names) > 0) {
+        combined <- combined |>
+          dplyr::left_join(known_names, by = "bank_id", suffix = c("", "_lookup")) |>
+          dplyr::mutate(bank_name = dplyr::coalesce(bank_name, bank_name_lookup)) |>
+          dplyr::select(-dplyr::any_of("bank_name_lookup"))
+      }
+    }
+    
+    # Second try: Use global bank lookup table for remaining gaps
+    missing_names <- is.na(combined$bank_name) | !("bank_name" %in% names(combined))
+    if (any(missing_names)) {
+      tryCatch({
+        lookup <- rb_build_name_lookup(include_csv = FALSE, cache = TRUE)
+        if (!is.null(lookup) && nrow(lookup) > 0) {
+          # Create bank_id -> name mapping
+          id_to_name <- lookup |>
+            dplyr::select(bank_id, name) |>
+            dplyr::distinct(bank_id, .keep_all = TRUE) |>
+            dplyr::rename(bank_name_global = name)
+          
+          combined <- combined |>
+            dplyr::left_join(id_to_name, by = "bank_id") |>
+            dplyr::mutate(
+              bank_name = if ("bank_name" %in% names(combined)) {
+                dplyr::coalesce(bank_name, bank_name_global)
+              } else {
+                bank_name_global
+              }
+            ) |>
+            dplyr::select(-dplyr::any_of("bank_name_global"))
+        }
+      }, error = function(e) NULL)
+    }
   }
   
   combined

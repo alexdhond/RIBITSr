@@ -38,10 +38,8 @@
       banks = NULL,           # Summary: API + EPA + CSV merged
       ledger = NULL,          # Transactions: API + CSV harmonized
       credit_summary = NULL,  # Credit classification: CSV
-      contacts = NULL,        # Sponsors/POCs/managers: API only
-      footprints = NULL,      # Spatial: EPA + API fallback
-      service_areas = NULL,   # Spatial: EPA + API fallback
-      geometry = NULL,        # Unified spatial layer
+      contacts = NULL,        # All contacts unified (sponsors/POCs/managers/IRT/other)
+      geometry = NULL,        # Unified spatial: centroids + footprints + service_areas
       .meta = list(
         fetch_date = Sys.Date(),
         fetch_timestamp = start_time,
@@ -81,20 +79,22 @@
   # Try RIBITS API first (if enabled)
   # Note: API list only returns 3 cols (bank_id, name, url)
   # We need to fetch detailed data for each bank to get full info (30+ cols)
-  banks_ribits <- if (use_api) {
+  
+  banks_ribits <- NULL
+  if (use_api) {
     if (!quietly) cli::cli_progress_step("Querying RIBITS API...")
-    tryCatch({
+    api_result <- tryCatch({
       # First get list of bank IDs
       bank_list <- rb_get(type, state = state, district = district)
       
       if (is.null(bank_list) || nrow(bank_list) == 0) {
-        NULL
+        list(banks = NULL, contacts = NULL)
       } else {
         # Find bank_id column (case-insensitive since we removed early clean_names)
         id_col <- names(bank_list)[tolower(names(bank_list)) == "bank_id"]
         if (length(id_col) == 0) {
           cli::cli_alert_warning("No bank_id column found in API list")
-          NULL
+          list(banks = NULL, contacts = NULL)
         } else {
           list_ids <- bank_list[[id_col[1]]]
           
@@ -105,31 +105,46 @@
             list_ids
           }
         
-        if (length(ids_to_fetch) == 0) {
-          NULL
-        } else {
-          # Fetch detailed data for each bank (has 30+ columns vs 3 in list)
-          if (!quietly) cli::cli_alert_info("Fetching detailed API data for {length(ids_to_fetch)} banks...")
-          
-          detailed <- rb_get(type, id = ids_to_fetch, ledger = FALSE, 
-                            footprint = FALSE, service_area = FALSE, contacts = FALSE)
-          
-          # Extract summary component (the main bank attributes)
-          if (is.list(detailed) && "summary" %in% names(detailed)) {
-            detailed$summary
+          if (length(ids_to_fetch) == 0) {
+            list(banks = NULL, contacts = NULL)
           } else {
-            # Fallback to list data if detail fetch fails
-            bank_list
+            # Fetch detailed data for each bank (has 30+ columns vs 3 in list)
+            # Enable contacts to get sponsors/POCs/managers in the same call
+            if (!quietly) cli::cli_alert_info("Fetching detailed API data for {length(ids_to_fetch)} banks...")
+            
+            detailed <- rb_get(type, id = ids_to_fetch, ledger = FALSE, 
+                              footprint = FALSE, service_area = FALSE, contacts = TRUE)
+            
+            # Extract summary and contacts
+            banks_data <- if (is.list(detailed) && "summary" %in% names(detailed)) {
+              detailed$summary
+            } else {
+              bank_list
+            }
+            
+            contacts_data <- if (is.list(detailed) && !is.null(detailed$contacts) && 
+                                 nrow(detailed$contacts) > 0) {
+              detailed$contacts
+            } else {
+              NULL
+            }
+            
+            list(banks = banks_data, contacts = contacts_data)
           }
-        }
         }
       }
     }, error = function(e) {
       if (!quietly) cli::cli_alert_warning("API query failed: {e$message}")
-      NULL
+      list(banks = NULL, contacts = NULL)
     })
-  } else {
-    NULL
+    
+    banks_ribits <- api_result$banks
+    
+    # Store contacts from API
+    if (!is.null(api_result$contacts) && nrow(api_result$contacts) > 0) {
+      result$contacts <- api_result$contacts
+      result$.meta$sources$contacts <- "ribits_api"
+    }
   }
 
   if (!is.null(banks_ribits) && nrow(banks_ribits) > 0) {
@@ -365,44 +380,12 @@
     }
   }
 
-  # ==========================================================================
-  # Step 2b: Get contacts data (API only - sponsors, POCs, managers)
-  # ==========================================================================
-  if (use_api && length(query_ids) <= 50) {
-    # Only fetch contacts for small queries (API is slow for contacts)
-    if (!quietly) cli::cli_progress_step("Fetching contacts from API...")
-    contacts_list <- list()
-    
-    for (bid in query_ids[1:min(length(query_ids), 20)]) {  # Limit to first 20
-      tryCatch({
-        bd <- rb_get("banks", id = bid, contacts = TRUE, ledger = FALSE,
-                     footprint = FALSE, service_area = FALSE)
-        if (!is.null(bd$sponsors) && nrow(bd$sponsors) > 0) {
-          bd$sponsors$bank_id <- bid
-          bd$sponsors$contact_type <- "sponsor"
-          contacts_list[[length(contacts_list) + 1]] <- bd$sponsors
-        }
-        if (!is.null(bd$pocs) && nrow(bd$pocs) > 0) {
-          bd$pocs$bank_id <- bid
-          bd$pocs$contact_type <- "poc"
-          contacts_list[[length(contacts_list) + 1]] <- bd$pocs
-        }
-        if (!is.null(bd$managers) && nrow(bd$managers) > 0) {
-          bd$managers$bank_id <- bid
-          bd$managers$contact_type <- "manager"
-          contacts_list[[length(contacts_list) + 1]] <- bd$managers
-        }
-      }, error = function(e) NULL)
-      Sys.sleep(0.05)
-    }
-    
-    if (length(contacts_list) > 0) {
-      result$contacts <- tryCatch(dplyr::bind_rows(contacts_list), error = function(e) NULL)
-      if (!is.null(result$contacts) && nrow(result$contacts) > 0) {
-        result$.meta$sources$contacts <- "ribits_api"
-        if (!quietly) cli::cli_alert_success("{nrow(result$contacts)} contacts from API")
-      }
-    }
+  # Note: Contacts are now extracted during the detailed API fetch above
+  # (contacts = TRUE in rb_get call) - no separate loop needed
+  
+  # Report contacts if we got them
+  if (!quietly && !is.null(result$contacts) && nrow(result$contacts) > 0) {
+    cli::cli_alert_success("{nrow(result$contacts)} contacts from API")
   }
 
   # ==========================================================================
@@ -477,7 +460,8 @@
       }
     }
 
-    # Combine footprints
+    # Combine footprints into temporary variable (will be added to unified geometry)
+    footprints_data <- NULL
     if (!is.null(epa_footprints) || !is.null(ribits_footprints)) {
       all_fp <- list()
       if (!is.null(epa_footprints) && nrow(epa_footprints) > 0) {
@@ -486,11 +470,10 @@
       if (!is.null(ribits_footprints) && nrow(ribits_footprints) > 0) {
         all_fp[[length(all_fp) + 1]] <- ribits_footprints
       }
-      result$footprints <- tryCatch(dplyr::bind_rows(all_fp), error = function(e) all_fp[[1]])
+      footprints_data <- tryCatch(dplyr::bind_rows(all_fp), error = function(e) all_fp[[1]])
 
       # Check for discrepancies in overlapping data
       if (!is.null(epa_footprints) && !is.null(ribits_footprints)) {
-        # Find bank_id columns (case-insensitive)
         epa_fp_col <- names(epa_footprints)[tolower(names(epa_footprints)) == "bank_id"][1]
         rib_fp_col <- names(ribits_footprints)[tolower(names(ribits_footprints)) == "bank_id"][1]
         if (!is.na(epa_fp_col) && !is.na(rib_fp_col)) {
@@ -509,8 +492,7 @@
           }
         }
       }
-
-      result$.meta$sources$footprints <- "epa_arcgis + ribits_api"
+      result$.meta$sources$geometry <- "epa_arcgis + ribits_api"
     }
 
     # Service areas (EPA ArcGIS + API fallback)
@@ -544,7 +526,8 @@
       }
     }
     
-    # Combine service areas
+    # Combine service areas into temporary variable (will be added to unified geometry)
+    service_areas_data <- NULL
     if (!is.null(epa_service_areas) || !is.null(ribits_service_areas)) {
       all_sa <- list()
       if (!is.null(epa_service_areas) && nrow(epa_service_areas) > 0) {
@@ -554,16 +537,19 @@
         all_sa[[length(all_sa) + 1]] <- ribits_service_areas
       }
       if (length(all_sa) > 0) {
-        result$service_areas <- tryCatch(dplyr::bind_rows(all_sa), error = function(e) all_sa[[1]])
-        result$.meta$sources$service_areas <- "epa_arcgis + ribits_api"
+        service_areas_data <- tryCatch(dplyr::bind_rows(all_sa), error = function(e) all_sa[[1]])
       }
     }
 
     if (!quietly) {
-      n_fp <- if (!is.null(result$footprints)) nrow(result$footprints) else 0
-      n_sa <- if (!is.null(result$service_areas)) nrow(result$service_areas) else 0
+      n_fp <- if (!is.null(footprints_data)) nrow(footprints_data) else 0
+      n_sa <- if (!is.null(service_areas_data)) nrow(service_areas_data) else 0
       cli::cli_alert_success("{n_fp} footprints, {n_sa} service areas")
     }
+  } else {
+    # Initialize to NULL if not fetching spatial
+    footprints_data <- NULL
+    service_areas_data <- NULL
   }
 
   # ==========================================================================
@@ -577,45 +563,63 @@
   if (!is.null(result$ledger) && nrow(result$ledger) > 0) {
     result$ledger <- janitor::clean_names(result$ledger)
   }
-  if (!is.null(result$footprints) && nrow(result$footprints) > 0) {
-    result$footprints <- janitor::clean_names(result$footprints)
+  if (!is.null(result$contacts) && nrow(result$contacts) > 0) {
+    result$contacts <- janitor::clean_names(result$contacts)
   }
-  if (!is.null(result$service_areas) && nrow(result$service_areas) > 0) {
-    result$service_areas <- janitor::clean_names(result$service_areas)
+  if (!is.null(result$credit_summary) && nrow(result$credit_summary) > 0) {
+    result$credit_summary <- janitor::clean_names(result$credit_summary)
   }
   
   # ==========================================================================
-  # Create unified geometry layer combining all spatial data
+  # Create unified geometry layer: centroids + footprints + service_areas
   # ==========================================================================
   if (include_spatial) {
     geom_layers <- list()
     
-    # Add centroids from banks data (if geometry available in EPA data)
-    if (!is.null(result$banks) && nrow(result$banks) > 0) {
-      # Check for centroid column (from API location data)
-      if ("bank_location_centroid" %in% names(result$banks)) {
-        centroids <- result$banks |>
-          dplyr::select(dplyr::any_of(c("bank_id", "name", "bank_status"))) |>
-          dplyr::mutate(geometry_type = "centroid")
-        # Note: centroids are in bank_location_centroid as GeoJSON strings
-        # Would need to parse - for now skip as EPA points layer is better
+    # 1. Add centroids from bank_location_centroid (GeoJSON strings in banks data)
+    if (!is.null(result$banks) && nrow(result$banks) > 0 && 
+        "bank_location_centroid" %in% names(result$banks)) {
+      centroids_list <- list()
+      for (i in seq_len(nrow(result$banks))) {
+        centroid_json <- result$banks$bank_location_centroid[i]
+        if (!is.na(centroid_json) && nchar(centroid_json) > 10) {
+          tryCatch({
+            pt <- sf::st_read(centroid_json, quiet = TRUE, drivers = "GeoJSON")
+            if (nrow(pt) > 0) {
+              pt$bank_id <- result$banks$bank_id[i]
+              pt$name <- result$banks$name[i]
+              pt$bank_status <- result$banks$bank_status[i]
+              pt$geometry_type <- "centroid"
+              pt$source <- "ribits_api"
+              centroids_list[[length(centroids_list) + 1]] <- pt
+            }
+          }, error = function(e) NULL)
+        }
+      }
+      if (length(centroids_list) > 0) {
+        centroids <- do.call(rbind, centroids_list)
+        centroids <- sf::st_set_geometry(centroids, "geometry")
+        geom_layers[["centroids"]] <- centroids |>
+          dplyr::select(dplyr::any_of(c("bank_id", "name", "bank_status", "geometry_type", "source")), geometry)
       }
     }
     
-    # Add footprints
-    if (!is.null(result$footprints) && nrow(result$footprints) > 0 && 
-        inherits(result$footprints, "sf")) {
-      fp <- result$footprints |>
+    # 2. Add footprints (stored temporarily during spatial fetch)
+    if (!is.null(footprints_data) && nrow(footprints_data) > 0 && 
+        inherits(footprints_data, "sf")) {
+      fp <- footprints_data |>
+        janitor::clean_names() |>
         dplyr::mutate(geometry_type = "footprint") |>
         dplyr::select(dplyr::any_of(c("bank_id", "bank_name", "name", "bank_status", 
                                        "geometry_type", "source")), geometry)
       geom_layers[["footprints"]] <- fp
     }
     
-    # Add service areas
-    if (!is.null(result$service_areas) && nrow(result$service_areas) > 0 && 
-        inherits(result$service_areas, "sf")) {
-      sa <- result$service_areas |>
+    # 3. Add service areas (stored temporarily during spatial fetch)
+    if (!is.null(service_areas_data) && nrow(service_areas_data) > 0 && 
+        inherits(service_areas_data, "sf")) {
+      sa <- service_areas_data |>
+        janitor::clean_names() |>
         dplyr::mutate(geometry_type = "service_area") |>
         dplyr::select(dplyr::any_of(c("bank_id", "bank_name", "name", "bank_status", 
                                        "geometry_type", "source")), geometry)
@@ -628,8 +632,8 @@
         combined <- dplyr::bind_rows(geom_layers)
         janitor::clean_names(combined)
       }, error = function(e) {
-        # Fallback: just use footprints if binding fails
-        if (!is.null(geom_layers[["footprints"]])) geom_layers[["footprints"]] else NULL
+        # Fallback: return first available layer
+        geom_layers[[1]]
       })
     }
   }
@@ -645,14 +649,14 @@
     # Summary of what was fetched
     n_banks <- if (!is.null(result$banks)) nrow(result$banks) else 0
     n_ledger <- if (!is.null(result$ledger)) nrow(result$ledger) else 0
-    n_fp <- if (!is.null(result$footprints)) nrow(result$footprints) else 0
-    n_sa <- if (!is.null(result$service_areas)) nrow(result$service_areas) else 0
+    n_contacts <- if (!is.null(result$contacts)) nrow(result$contacts) else 0
+    n_geom <- if (!is.null(result$geometry)) nrow(result$geometry) else 0
     
     cli::cli_bullets(c(
       "v" = "{n_banks} {resource_name}s",
       "v" = "{n_ledger} transactions",
-      "v" = "{n_fp} footprints",
-      "v" = "{n_sa} service areas"
+      "v" = "{n_contacts} contacts",
+      "v" = "{n_geom} geometries (centroids + footprints + service areas)"
     ))
     
     # Report discrepancies
