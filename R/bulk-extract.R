@@ -1,12 +1,14 @@
 # R/bulk-extract.R
 # Functions for bulk extraction of RIBITS data via API
 
-#' Extract all ledger/transaction data via API
+#' Extract all ledger/transaction data via API (Internal)
+#'
+#' @description
+#' This function is internal and called by `rb_transactions()` and `ribits()`.
 #'
 #' Fetches ledger data for all banks (or a subset) directly from the RIBITS API.
 #' This provides transaction-level data including permittee, permit numbers,
-#' impact HUC, and credit classification - much of which was previously thought
-#' to require manual CSV downloads.
+#' impact HUC, and credit classification.
 #'
 #' Features automatic retry on network failures and checkpointing to resume
 #' interrupted downloads.
@@ -20,20 +22,14 @@
 #' @param checkpoint_every Save checkpoint every N banks. Default 10.
 #'
 #' @return A tibble with all ledger transactions across banks
-#' @export
+#' @keywords internal
 #' @examples
 #' \dontrun{
-#' # Get all ledger data for California banks
+#' # Recommended: Use ribits() instead
+#' ca <- ribits(state = "CA", transactions = "comprehensive")
+#'
+#' # Internal usage
 #' ca_ledger <- rb_bulk_ledger(state = "CA")
-#'
-#' # Get ledger for specific banks
-#' ledger <- rb_bulk_ledger(bank_ids = c(17, 100, 500))
-#'
-#' # If interrupted, just run again to resume
-#' ledger <- rb_bulk_ledger(state = "CA")  # Resumes from checkpoint
-#'
-#' # See available checkpoints
-#' rb_checkpoints()
 #' }
 rb_bulk_ledger <- function(bank_ids = NULL,
                             state = NULL,

@@ -39,11 +39,11 @@ rb_extract <- function(data, field,
   type <- match.arg(type)
 
   # Get the field value (case-insensitive column lookup)
-  field_col <- names(data)[tolower(names(data)) == tolower(field)]
-  if (length(field_col) == 0) {
+  field_col <- .get_column_case_insensitive(data, field)
+  if (is.na(field_col)) {
     return(tibble::tibble())
   }
-  val <- data[[field_col[1]]]
+  val <- data[[field_col]]
 
   # Handle list-column extraction from tibble
   if (is.list(val) && length(val) == 1 && is.data.frame(data)) {
@@ -313,27 +313,27 @@ rb_extract_ledger <- function(data) {
 #' @return A tibble containing contacts (may be empty if show_contacts = FALSE)
 #' @keywords internal
 rb_extract_contacts <- function(data) {
+
+  # Get bank_id and bank_name from source data (names are now always lowercase)
+  bank_id <- if ("bank_id" %in% names(data)) data$bank_id[1] else NA_integer_
+  bank_name <- if ("bank_name" %in% names(data)) data$bank_name[1]
+    else if ("name" %in% names(data)) data$name[1]
+    else NA_character_
+
   # Try to extract all contact types and combine
-  # Handle both uppercase (raw API) and lowercase (clean_names) column names
   contact_fields <- c("bank_sponsors", "bank_pocs", "bank_managers",
                       "bank_irt_members", "bank_other_contacts",
                       "program_sponsors", "program_pocs", "program_managers",
                       "program_irt_members", "program_other_contacts")
 
   results <- purrr::map(contact_fields, function(field) {
-    # Try both lowercase and uppercase versions
-    actual_field <- if (field %in% names(data)) {
-      field
-    } else if (toupper(field) %in% names(data)) {
-      toupper(field)
-    } else {
-      NULL
-    }
-    
-    if (!is.null(actual_field)) {
-      df <- rb_extract(data, actual_field, add_id = FALSE)
+    if (field %in% names(data)) {
+      df <- rb_extract(data, field, add_id = FALSE)
       if (nrow(df) > 0) {
-        df$contact_type <- field  # Use normalized lowercase name
+        # Add bank identification and contact type
+        df$bank_id <- bank_id
+        df$bank_name <- bank_name
+        df$contact_type <- field
         return(df)
       }
     }
@@ -343,19 +343,35 @@ rb_extract_contacts <- function(data) {
   dplyr::bind_rows(purrr::compact(results))
 }
 
+#' Extract contact type from RIBITS data (internal factory)
+#'
+#' @description
+#' Internal helper to extract specific contact types. Since we now clean
+#' column names early, we can simplify this to check for lowercase names only.
+#'
+#' @param data A tibble returned by `rb_get_*()` functions
+#' @param contact_type Type of contact: "sponsors", "pocs", "managers", "irt_members", "other_contacts"
+#' @keywords internal
+#' @noRd
+.rb_extract_contact_type <- function(data, contact_type) {
+  # Try bank_ and program_ prefixes (names are already cleaned to lowercase)
+  field <- if (paste0("bank_", contact_type) %in% names(data)) {
+    paste0("bank_", contact_type)
+  } else if (paste0("program_", contact_type) %in% names(data)) {
+    paste0("program_", contact_type)
+  } else {
+    NULL
+  }
+
+  if (!is.null(field)) rb_extract(data, field) else tibble::tibble()
+}
+
 #' Extract sponsors from RIBITS data
 #' @param data A tibble returned by `rb_get_*()` functions
 #' @return A tibble
 #' @keywords internal
 rb_extract_sponsors <- function(data) {
-  # Handle both uppercase (raw API) and lowercase (clean_names)
-  field <- if ("bank_sponsors" %in% names(data)) "bank_sponsors"
-    else if ("BANK_SPONSORS" %in% names(data)) "BANK_SPONSORS"
-    else if ("program_sponsors" %in% names(data)) "program_sponsors"
-    else if ("PROGRAM_SPONSORS" %in% names(data)) "PROGRAM_SPONSORS"
-    else NULL
-  
-  if (!is.null(field)) rb_extract(data, field) else tibble::tibble()
+  .rb_extract_contact_type(data, "sponsors")
 }
 
 #' Extract POCs from RIBITS data
@@ -363,13 +379,7 @@ rb_extract_sponsors <- function(data) {
 #' @return A tibble
 #' @keywords internal
 rb_extract_pocs <- function(data) {
-  field <- if ("bank_pocs" %in% names(data)) "bank_pocs"
-    else if ("BANK_POCS" %in% names(data)) "BANK_POCS"
-    else if ("program_pocs" %in% names(data)) "program_pocs"
-    else if ("PROGRAM_POCS" %in% names(data)) "PROGRAM_POCS"
-    else NULL
-  
-  if (!is.null(field)) rb_extract(data, field) else tibble::tibble()
+  .rb_extract_contact_type(data, "pocs")
 }
 
 #' Extract managers from RIBITS data
@@ -377,13 +387,7 @@ rb_extract_pocs <- function(data) {
 #' @return A tibble
 #' @keywords internal
 rb_extract_managers <- function(data) {
-  field <- if ("bank_managers" %in% names(data)) "bank_managers"
-    else if ("BANK_MANAGERS" %in% names(data)) "BANK_MANAGERS"
-    else if ("program_managers" %in% names(data)) "program_managers"
-    else if ("PROGRAM_MANAGERS" %in% names(data)) "PROGRAM_MANAGERS"
-    else NULL
-  
-  if (!is.null(field)) rb_extract(data, field) else tibble::tibble()
+  .rb_extract_contact_type(data, "managers")
 }
 
 #' Extract IRT members from RIBITS data
@@ -391,13 +395,7 @@ rb_extract_managers <- function(data) {
 #' @return A tibble
 #' @keywords internal
 rb_extract_irt_members <- function(data) {
-  field <- if ("bank_irt_members" %in% names(data)) "bank_irt_members"
-    else if ("BANK_IRT_MEMBERS" %in% names(data)) "BANK_IRT_MEMBERS"
-    else if ("program_irt_members" %in% names(data)) "program_irt_members"
-    else if ("PROGRAM_IRT_MEMBERS" %in% names(data)) "PROGRAM_IRT_MEMBERS"
-    else NULL
-  
-  if (!is.null(field)) rb_extract(data, field) else tibble::tibble()
+  .rb_extract_contact_type(data, "irt_members")
 }
 
 #' Extract other contacts from RIBITS data
@@ -405,13 +403,7 @@ rb_extract_irt_members <- function(data) {
 #' @return A tibble
 #' @keywords internal
 rb_extract_other_contacts <- function(data) {
-  field <- if ("bank_other_contacts" %in% names(data)) "bank_other_contacts"
-    else if ("BANK_OTHER_CONTACTS" %in% names(data)) "BANK_OTHER_CONTACTS"
-    else if ("program_other_contacts" %in% names(data)) "program_other_contacts"
-    else if ("PROGRAM_OTHER_CONTACTS" %in% names(data)) "PROGRAM_OTHER_CONTACTS"
-    else NULL
-  
-  if (!is.null(field)) rb_extract(data, field) else tibble::tibble()
+  .rb_extract_contact_type(data, "other_contacts")
 }
 
 #' Extract program sites from ILF program data

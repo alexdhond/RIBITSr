@@ -11,7 +11,10 @@
 .network_options$verbose <- TRUE
 
 
-#' Configure network settings
+#' Configure network settings (Internal)
+#'
+#' @description
+#' This function is internal. Network settings have sensible defaults.
 #'
 #' Set package-wide options for network behavior including retries,
 #' timeouts, and checkpointing.
@@ -25,8 +28,9 @@
 #' @param verbose Show detailed progress messages. Default TRUE.
 #'
 #' @return Invisibly returns current settings
-#' @export
+#' @keywords internal
 #' @examples
+#' \dontrun{
 #' # Increase retries for unreliable connection
 #' rb_network_config(max_retries = 5, timeout = 60)
 #'
@@ -35,6 +39,7 @@
 #'
 #' # Disable checkpointing
 #' rb_network_config(checkpoint_dir = FALSE)
+#' }
 rb_network_config <- function(max_retries = NULL,
                                retry_delay = NULL,
                                backoff_multiplier = NULL,
@@ -174,19 +179,19 @@ rb_request_with_retry <- function(req,
 }
 
 
-#' View network failure log
+#' View network failure log (Internal)
+#'
+#' @description
+#' This function is internal. Network failures are logged automatically.
 #'
 #' Shows all network failures that occurred during the session.
 #'
 #' @param clear If TRUE, clears the log after displaying. Default FALSE.
 #' @return A tibble of network failures
-#' @export
+#' @keywords internal
 #' @examples
 #' \dontrun{
-#' # View failures
 #' rb_network_failures()
-#'
-#' # View and clear
 #' rb_network_failures(clear = TRUE)
 #' }
 rb_network_failures <- function(clear = FALSE) {
@@ -309,15 +314,17 @@ rb_network_failures <- function(clear = FALSE) {
 }
 
 
-#' List available checkpoints
+#' List available checkpoints (Internal)
+#'
+#' @description
+#' This function is internal. Checkpointing is handled automatically.
 #'
 #' Shows checkpoints from interrupted operations that can be resumed.
 #'
 #' @return A tibble of available checkpoints
-#' @export
+#' @keywords internal
 #' @examples
 #' \dontrun{
-#' # See what can be resumed
 #' rb_checkpoints()
 #' }
 rb_checkpoints <- function() {
@@ -357,9 +364,12 @@ rb_checkpoints <- function() {
 }
 
 
-#' Clear all checkpoints
+#' Clear all checkpoints (Internal)
 #'
-#' @export
+#' @description
+#' This function is internal. Checkpoints are cleared automatically on success.
+#'
+#' @keywords internal
 rb_clear_checkpoints <- function() {
   dir <- .get_checkpoint_dir()
 

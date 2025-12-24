@@ -2,7 +2,7 @@
 % Please edit documentation in R/unified-api.R
 \name{rb_epa}
 \alias{rb_epa}
-\title{Query EPA ArcGIS for RIBITS spatial data}
+\title{Query EPA ArcGIS for RIBITS spatial data (Internal)}
 \usage{
 rb_epa(
   layer = NULL,
@@ -44,6 +44,8 @@ rb_epa(
 An sf object with the queried features
 }
 \description{
+This function is internal and called automatically by \code{ribits()}.
+
 Unified function to query any EPA ArcGIS layer. Replaces the individual
 rb_epa_* functions with a single flexible interface.
 }
@@ -65,3 +67,4 @@ ca_banks <- rb_epa("banks", state = "CA", kind = "Standard")
 rb_epa()
 }
 }
+\keyword{internal}

@@ -27,9 +27,9 @@ rb_request <- function(endpoint, params = list(), description = NULL) {
   }
 
   req <- httr2::request(url) |>
-    httr2::req_user_agent("RIBITSr R package") |>
+    httr2::req_user_agent("RIBITSr R package") # |>
     # Throttle requests to 5 per second (adjust as needed)
-    httr2::req_throttle(rate = 5 / 1)
+    # httr2::req_throttle(rate = 5 / 1)
 
   if (length(params) > 0) {
     # The API expects filters in a 'q' parameter as a JSON string
@@ -64,8 +64,7 @@ rb_parse_response <- function(resp) {
 rb_extract_items <- function(data) {
 
   # Handle ORDS response structure (often in 'items')
-  # Note: We preserve original column names here - clean_names() is applied at final output
-  if ("items" %in% names(data)) {
+  result <- if ("items" %in% names(data)) {
     tibble::as_tibble(data$items)
   } else if ("ITEMS" %in% names(data)) {
     tibble::as_tibble(data$ITEMS)
@@ -75,6 +74,13 @@ rb_extract_items <- function(data) {
   } else {
     tibble::as_tibble(data)
   }
+
+  # Clean column names immediately to avoid case-insensitive lookups throughout codebase
+  if (ncol(result) > 0) {
+    result <- janitor::clean_names(result)
+  }
+
+  result
 }
 
 #' Friendly error for common issues

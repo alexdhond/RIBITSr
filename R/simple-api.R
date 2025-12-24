@@ -19,21 +19,35 @@
 #' @param state State filter (e.g., "CA", "OR", "TX")
 #' @param district USACE district filter (e.g., "Portland", "Sacramento")
 #' @param ids Optional vector of specific IDs to retrieve (bank_ids, program_ids, etc.)
-#' @param ledger Include transaction/credit ledger data? Default TRUE (banks only).
-#' @param spatial Include footprint and service area geometries? Default TRUE.
-#' @param sources Which data sources to use. Default: all available
-#'   - "api" = RIBITS API only (fast, real-time)
+#' @param transactions Level of transaction data to include (banks only):
+#'   - "none": No transaction data (fastest)
+#'   - "basic" (default): API ledger only (~20 columns, fast, real-time data)
+#'   - "comprehensive": Full 3-source harmonization (~85 columns, slower but most complete)
+#'
+#'   The "comprehensive" option merges data from watershed CSV, API ledger, and CSV reports.
+#'   Use "basic" for quick queries, "comprehensive" for data analysis requiring maximum detail.
+#'
+#' @param spatial Include spatial data (footprints and service area geometries)? Default TRUE.
+#'   Set to FALSE for faster queries when you only need bank attributes.
+#'
+#' @param sources Which data sources to use. Default: c("api", "epa", "csv") (all sources).
+#'   - "api" = RIBITS API only (fastest, real-time, ~30 seconds)
 #'   - "epa" = EPA ArcGIS only (spatial data)
-#'   - "csv" = Direct CSV downloads (official records)
-#'   - c("api", "epa", "csv") = All sources (recommended, default)
-#' @param cache Cache downloaded CSV files? Default TRUE.
+#'   - "csv" = Direct CSV downloads (official records, slow)
+#'   - c("api", "epa", "csv") = All sources (recommended for accuracy, ~60-90 seconds)
+#'
+#'   Using all sources provides the most complete and accurate data. If a source fails,
+#'   the package automatically falls back to other sources.
+#'
+#' @param cache Cache downloaded CSV files to temp directory? Default TRUE.
+#'   Significantly speeds up repeated queries. Cache is cleared when R session ends.
+#'
 #' @param quietly Suppress progress messages? Default FALSE.
 #'
 #' @return A `ribits_data` object containing:
 #'   \item{banks/programs/umbrellas}{Summary data (tibble)}
-#'   \item{ledger}{Transaction/credit tracking data (tibble, banks only)}
-#'   \item{footprints}{Footprint geometries (sf object)}
-#'   \item{service_areas}{Service area geometries (sf object)}
+#'   \item{transactions}{Transaction/credit tracking data (tibble, banks only)}
+#'   \item{geometry}{Spatial data including footprints and service areas (sf object)}
 #'   \item{.meta}{Metadata including sources used and any discrepancies}
 #'
 #' @export
@@ -44,8 +58,11 @@
 #'
 #' # Access the data
 #' ca$banks           # Summary data
-#' ca$ledger          # Transaction history
-#' ca$footprints      # Spatial polygons
+#' ca$transactions    # Transaction history
+#' ca$geometry        # Spatial polygons
+#'
+#' # Get comprehensive transaction data (3-source harmonization, ~85 columns)
+#' ca_full <- ribits(state = "CA", transactions = "comprehensive")
 #'
 #' # Get ILF programs
 #' ilf <- ribits(type = "ilf", state = "TX")
@@ -56,8 +73,8 @@
 #' # Get specific banks by ID
 #' my_banks <- ribits(ids = c(17, 100, 345))
 #'
-#' # Just summary data, no spatial (faster)
-#' summary <- ribits(state = "OR", spatial = FALSE, ledger = FALSE)
+#' # Just summary data, no spatial or transactions (fastest)
+#' summary <- ribits(state = "OR", spatial = FALSE, transactions = "none")
 #'
 #' # Only use API source (fastest, real-time)
 #' api_only <- ribits(state = "TX", sources = "api")
@@ -66,18 +83,20 @@ ribits <- function(type = "banks",
                    state = NULL,
                    district = NULL,
                    ids = NULL,
-                   ledger = TRUE,
+                   transactions = c("basic", "comprehensive", "none"),
                    spatial = TRUE,
                    sources = c("api", "epa", "csv"),
                    cache = TRUE,
                    quietly = FALSE) {
 
   type <- match.arg(type, c("banks", "ilf", "umbrellas"))
+  transactions <- match.arg(transactions)
 
   # Determine what data to fetch
-  # Ledger only applies to banks
-  include_ledger <- ledger && type == "banks"
-  
+  # Transactions only apply to banks
+  include_ledger <- transactions != "none" && type == "banks"
+  include_comprehensive <- transactions == "comprehensive" && type == "banks"
+
   what <- if (include_ledger && spatial) {
     "all"
   } else if (spatial) {
@@ -97,7 +116,8 @@ ribits <- function(type = "banks",
     type = type,
     sources = sources,
     cache = cache,
-    quietly = quietly
+    quietly = quietly,
+    include_detailed_transactions = include_comprehensive
   )
 }
 

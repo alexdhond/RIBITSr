@@ -2,7 +2,7 @@
 % Please edit documentation in R/bulk-extract.R
 \name{rb_bulk_ledger}
 \alias{rb_bulk_ledger}
-\title{Extract all ledger/transaction data via API}
+\title{Extract all ledger/transaction data via API (Internal)}
 \usage{
 rb_bulk_ledger(
   bank_ids = NULL,
@@ -31,27 +31,22 @@ Default TRUE.}
 A tibble with all ledger transactions across banks
 }
 \description{
+This function is internal and called by \code{rb_transactions()} and \code{ribits()}.
+
 Fetches ledger data for all banks (or a subset) directly from the RIBITS API.
 This provides transaction-level data including permittee, permit numbers,
-impact HUC, and credit classification - much of which was previously thought
-to require manual CSV downloads.
-}
-\details{
+impact HUC, and credit classification.
+
 Features automatic retry on network failures and checkpointing to resume
 interrupted downloads.
 }
 \examples{
 \dontrun{
-# Get all ledger data for California banks
+# Recommended: Use ribits() instead
+ca <- ribits(state = "CA", transactions = "comprehensive")
+
+# Internal usage
 ca_ledger <- rb_bulk_ledger(state = "CA")
-
-# Get ledger for specific banks
-ledger <- rb_bulk_ledger(bank_ids = c(17, 100, 500))
-
-# If interrupted, just run again to resume
-ledger <- rb_bulk_ledger(state = "CA")  # Resumes from checkpoint
-
-# See available checkpoints
-rb_checkpoints()
 }
 }
+\keyword{internal}

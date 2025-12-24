@@ -1,380 +1,474 @@
 # R/harmonize-transactions.R
-# Harmonize transaction-level data (ledger, credit classification) from multiple sources
+# Harmonize transaction-level data from multiple sources with transactions_watershed as foundation
 
-#' Get harmonized ledger/transaction data
+#' Get harmonized transaction data (Internal)
 #'
-#' Combines transaction data from multiple sources to maximize coverage:
-#' - RIBITS API ledger (real-time, per-bank)
-#' - Ledger Transactions CSV (bulk download, additional fields)
-#' - Credit Classification CSV (aggregated credit summaries)
+#' @description
+#' This function is now internal. Use `ribits(transactions = "comprehensive")` instead.
+#'
+#' Combines transaction data from three sources to maximize coverage and columns:
+#' - Transactions by Watershed CSV (foundation - 71 columns, has native bank_id)
+#' - RIBITS API ledger (gap-filling, real-time, unique fields like transaction_id)
+#' - Ledger Transactions CSV (additional fields like sub_ledger_id, permit_auth_date)
+#'
+#' This function uses transactions_watershed as the primary source since it has the most
+#' comprehensive data (71 columns) and includes bank_id natively (no name matching needed).
 #'
 #' @param bank_ids Optional vector of bank IDs to filter
 #' @param state Optional state filter
 #' @param district Optional district filter
-#' @param sources Which sources to use. Default all: c("api", "csv")
-#' @param priority Optional. Source priority for column conflicts ("api" or "csv").
-#'   If NULL, uses global config from rb_discrepancy_config().
-#' @param include_credit_class Include credit classification summary? Default TRUE.
-#' @param progress Show progress. Default TRUE.
+#' @param include_detailed If TRUE, returns transactions. If FALSE, returns NULL (for summary integration). Default TRUE.
 #' @param cache_dir Directory for CSV cache. Default tempdir().
 #'
-#' @return A list with:
-#'   \item{transactions}{Harmonized transaction-level data}
-#'   \item{credit_summary}{Credit classification summary by bank}
-#'   \item{.meta}{Metadata about sources and coverage}
+#' @return If include_detailed=TRUE: A list with transactions and metadata.
+#'   If include_detailed=FALSE: NULL (used when only summaries needed in banks dataframe)
 #'
-#' @export
+#' @keywords internal
 #' @examples
 #' \dontrun{
-#' # Get all transactions for Washington banks
-#' wa_txns <- rb_transactions(state = "WA")
+#' # Recommended: Use ribits() instead
+#' ca <- ribits(state = "CA", transactions = "comprehensive")
 #'
-#' # Access data
-#' wa_txns$transactions     # Individual transactions
-#' wa_txns$credit_summary   # Credit totals by classification
+#' # Internal usage (advanced)
+#' wa_txns <- rb_transactions(state = "WA")
+#' wa_txns$transactions
 #' }
 rb_transactions <- function(bank_ids = NULL,
                             state = NULL,
                             district = NULL,
-                            sources = c("api", "csv"),
-                            priority = NULL,
-                            include_credit_class = TRUE,
-                            progress = TRUE,
+                            include_detailed = TRUE,
                             cache_dir = NULL) {
-  
+
   if (is.null(cache_dir)) {
     cache_dir <- file.path(tempdir(), "ribits_cache")
     dir.create(cache_dir, showWarnings = FALSE, recursive = TRUE)
   }
-  
-  sources <- match.arg(sources, c("api", "csv"), several.ok = TRUE)
-  use_api <- "api" %in% sources
-  use_csv <- "csv" %in% sources
-  
-  if (progress) cli::cli_h2("Fetching Transaction Data")
-  
+
+  # If not including detailed, return NULL immediately
+  # (Used when only summaries needed in banks dataframe)
+  if (!include_detailed) {
+    return(NULL)
+  }
+
+  cli::cli_h2("Fetching Transaction Data")
+
   result <- list(
     transactions = NULL,
-    credit_summary = NULL,
     .meta = list(
       sources = list(),
       coverage = list(),
       fetch_date = Sys.Date()
     )
   )
-  
+
   # === Get bank IDs if not provided ===
   if (is.null(bank_ids)) {
-    if (progress) cli::cli_progress_step("Getting bank list...")
+    cli::cli_progress_step("Getting bank list...")
     banks <- rb_get("banks", state = state, district = district)
-    # Handle case-insensitive column names
-    id_col <- names(banks)[tolower(names(banks)) == "bank_id"][1]
+    id_col <- .get_column_case_insensitive(banks, "bank_id")
     bank_ids <- if (!is.na(id_col)) banks[[id_col]] else integer()
-    if (progress) cli::cli_alert_info("Found {length(bank_ids)} banks")
+    cli::cli_alert_info("Found {length(bank_ids)} banks")
   }
-  
+
   if (length(bank_ids) == 0) {
-    if (progress) cli::cli_alert_warning("No banks found")
+    cli::cli_alert_warning("No banks found")
     return(result)
   }
-  
-  # === Source 1: API Ledger ===
-  api_ledger <- NULL
-  if (use_api) {
-    if (progress) cli::cli_progress_step("Fetching API ledger data...")
-    
-    api_ledger <- tryCatch({
-      # Use bulk ledger extraction
-      rb_bulk_ledger(bank_ids = bank_ids, progress = progress)
-    }, error = function(e) {
-      if (progress) cli::cli_alert_warning("API ledger failed: {e$message}")
-      NULL
-    })
-    
-    if (!is.null(api_ledger) && nrow(api_ledger) > 0) {
-      # Normalize column names
-      names(api_ledger) <- tolower(names(api_ledger))
-      api_ledger$source <- "api"
-      if (progress) cli::cli_alert_success("API: {nrow(api_ledger)} transactions")
-    }
-  }
-  
-  # === Source 2: CSV Ledger Transactions ===
-  csv_ledger <- NULL
-  if (use_csv) {
-    if (progress) cli::cli_progress_step("Downloading CSV ledger...")
-    
-    csv_ledger <- tryCatch({
-      csv_file <- rb_download_report("ledger_transactions", download_dir = cache_dir)
-      data <- rb_read(csv_file)
-      
-      # Normalize column names
-      names(data) <- janitor::make_clean_names(names(data))
-      
-      # Filter by bank_ids using name matching if needed
-      if ("bank_id" %in% names(data)) {
-        data <- data |> dplyr::filter(bank_id %in% bank_ids)
-      } else if ("name" %in% names(data)) {
-        # Build lookup for name -> bank_id matching
+
+  # ===================================================================
+  # Source 1: Transactions by Watershed CSV (FOUNDATION - 71 columns!)
+  # ===================================================================
+  watershed_txns <- NULL
+  cli::cli_progress_step("Downloading transactions by watershed CSV (foundation)...")
+
+  watershed_txns <- tryCatch({
+    csv_file <- rb_download_report("transactions_watershed", download_dir = cache_dir)
+    data <- rb_read(csv_file)
+
+    # Normalize column names
+    names(data) <- janitor::make_clean_names(names(data))
+
+    # Filter by bank_ids
+    # This CSV has native bank_id - no name matching needed!
+    if ("bank_id" %in% names(data)) {
+      data <- data |> dplyr::filter(bank_id %in% bank_ids)
+    } else {
+      cli::cli_alert_warning("No bank_id in transactions_watershed - attempting name match")
+      if ("name" %in% names(data)) {
         lookup <- rb_build_name_lookup(include_csv = FALSE, cache = TRUE)
         data <- rb_match_names(data, lookup, name_col = "name", fuzzy = TRUE)
         data <- data |> dplyr::filter(bank_id %in% bank_ids)
       }
-      
-      data$source <- "csv_ledger"
-      data
-    }, error = function(e) {
-      if (progress) cli::cli_alert_warning("CSV ledger failed: {e$message}")
-      NULL
-    })
-    
-    if (!is.null(csv_ledger) && nrow(csv_ledger) > 0) {
-      if (progress) cli::cli_alert_success("CSV Ledger: {nrow(csv_ledger)} transactions")
     }
+
+    data$source <- "csv_watershed"
+    data
+  }, error = function(e) {
+    cli::cli_alert_warning("Transactions by watershed CSV failed: {e$message}")
+    NULL
+  })
+
+  if (!is.null(watershed_txns) && nrow(watershed_txns) > 0) {
+    cli::cli_alert_success("Watershed CSV: {nrow(watershed_txns)} transactions ({ncol(watershed_txns)} columns)")
   }
-  
-  # === Merge Transaction Data ===
-  if (progress) cli::cli_progress_step("Harmonizing transaction data...")
-  
-  transactions <- .harmonize_transactions(api_ledger, csv_ledger, priority = priority)
-  
+
+  # ===================================================================
+  # Source 2: API Ledger (GAP-FILLING - adds transaction_id, real-time data)
+  # ===================================================================
+  api_ledger <- NULL
+  cli::cli_progress_step("Fetching API ledger for gap-filling...")
+
+  api_ledger <- tryCatch({
+    # Use bulk ledger extraction
+    rb_bulk_ledger(bank_ids = bank_ids, progress = FALSE)
+  }, error = function(e) {
+    cli::cli_alert_warning("API ledger failed: {e$message}")
+    NULL
+  })
+
+  if (!is.null(api_ledger) && nrow(api_ledger) > 0) {
+    # Normalize column names
+    names(api_ledger) <- tolower(names(api_ledger))
+    api_ledger$source <- "api"
+    cli::cli_alert_success("API Ledger: {nrow(api_ledger)} transactions ({ncol(api_ledger)} columns)")
+  }
+
+  # ===================================================================
+  # Source 3: CSV Ledger Transactions (ADDITIONAL FIELDS - sub_ledger_id, permit_auth_date)
+  # ===================================================================
+  csv_ledger <- NULL
+  cli::cli_progress_step("Downloading CSV ledger for additional fields...")
+
+  csv_ledger <- tryCatch({
+    csv_file <- rb_download_report("ledger_transactions", download_dir = cache_dir)
+    data <- rb_read(csv_file)
+
+    # Normalize column names
+    names(data) <- janitor::make_clean_names(names(data))
+
+    # Filter by bank_ids
+    if ("bank_id" %in% names(data)) {
+      data <- data |> dplyr::filter(bank_id %in% bank_ids)
+    } else if ("name" %in% names(data)) {
+      lookup <- rb_build_name_lookup(include_csv = FALSE, cache = TRUE)
+      data <- rb_match_names(data, lookup, name_col = "name", fuzzy = TRUE)
+      data <- data |> dplyr::filter(bank_id %in% bank_ids)
+    }
+
+    data$source <- "csv_ledger"
+    data
+  }, error = function(e) {
+    cli::cli_alert_warning("CSV ledger failed: {e$message}")
+    NULL
+  })
+
+  if (!is.null(csv_ledger) && nrow(csv_ledger) > 0) {
+    cli::cli_alert_success("CSV Ledger: {nrow(csv_ledger)} transactions ({ncol(csv_ledger)} columns)")
+  }
+
+  # ===================================================================
+  # THREE-WAY MERGE: watershed (foundation) + API (gap-fill) + CSV ledger (extras)
+  # ===================================================================
+  cli::cli_progress_step("Harmonizing transactions (3-way merge)...")
+
+  transactions <- .harmonize_transactions_threeway(
+    watershed_txns,
+    api_ledger,
+    csv_ledger
+  )
+
   if (!is.null(transactions) && nrow(transactions) > 0) {
     result$transactions <- transactions
     result$.meta$sources$transactions <- paste(
-      c(if (!is.null(api_ledger)) "api" else NULL,
+      c(if (!is.null(watershed_txns)) "csv_watershed" else NULL,
+        if (!is.null(api_ledger)) "api" else NULL,
         if (!is.null(csv_ledger)) "csv_ledger" else NULL),
       collapse = " + "
     )
-    if (progress) cli::cli_alert_success("Harmonized: {nrow(transactions)} transactions")
+    cli::cli_alert_success("Harmonized: {nrow(transactions)} transactions ({ncol(transactions)} columns)")
+  } else {
+    cli::cli_alert_warning("No transactions after harmonization")
   }
-  
-  # === Source 3: Credit Classification Summary ===
-  if (include_credit_class && use_csv) {
-    if (progress) cli::cli_progress_step("Downloading credit classification...")
-    
-    credit_summary <- tryCatch({
-      cc_file <- rb_download_report("credit_classification", download_dir = cache_dir)
-      data <- rb_read(cc_file)
-      
-      # Normalize column names
-      names(data) <- janitor::make_clean_names(names(data))
-      
-      # Match to bank_ids
-      if (!"bank_id" %in% names(data) && "bank_name" %in% names(data)) {
-        lookup <- rb_build_name_lookup(include_csv = FALSE, cache = TRUE)
-        data <- rb_match_names(data, lookup, name_col = "bank_name", fuzzy = TRUE)
-      }
-      
-      if ("bank_id" %in% names(data)) {
-        data <- data |> dplyr::filter(bank_id %in% bank_ids)
-      }
-      
-      data
-    }, error = function(e) {
-      if (progress) cli::cli_alert_warning("Credit classification failed: {e$message}")
-      NULL
-    })
-    
-    if (!is.null(credit_summary) && nrow(credit_summary) > 0) {
-      result$credit_summary <- credit_summary
-      result$.meta$sources$credit_summary <- "csv"
-      if (progress) cli::cli_alert_success("Credit Summary: {nrow(credit_summary)} rows")
-    }
-  }
-  
+
   # === Coverage stats ===
   result$.meta$coverage <- list(
     bank_ids_requested = length(bank_ids),
-    banks_with_transactions = if (!is.null(result$transactions)) 
+    banks_with_transactions = if (!is.null(result$transactions))
       length(unique(result$transactions$bank_id)) else 0,
-    banks_with_credit_summary = if (!is.null(result$credit_summary))
-      length(unique(result$credit_summary$bank_id)) else 0
+    total_columns = if (!is.null(result$transactions))
+      ncol(result$transactions) else 0
   )
-  
-  if (progress) {
-    cli::cli_h3("Coverage Summary")
-    cli::cli_bullets(c(
-      "*" = "Banks requested: {result$.meta$coverage$bank_ids_requested}",
-      "*" = "With transactions: {result$.meta$coverage$banks_with_transactions}",
-      "*" = "With credit summary: {result$.meta$coverage$banks_with_credit_summary}"
-    ))
-  }
-  
+
+  cli::cli_h3("Coverage Summary")
+  cli::cli_bullets(c(
+    "*" = "Banks requested: {result$.meta$coverage$bank_ids_requested}",
+    "*" = "With transactions: {result$.meta$coverage$banks_with_transactions}",
+    "*" = "Total columns: {result$.meta$coverage$total_columns}"
+  ))
+
   class(result) <- c("ribits_transactions", "list")
   result
 }
 
 
-#' Harmonize transaction data from multiple sources
+#' Three-way harmonization of transaction data
+#'
+#' Merges transactions from watershed CSV (foundation), API ledger (gap-filling),
+#' and CSV ledger (additional fields).
+#'
+#' @param watershed_txns Transactions by watershed CSV (foundation)
+#' @param api_ledger API ledger data
+#' @param csv_ledger CSV ledger transactions data
+#'
+#' @return Harmonized transactions tibble
 #' @keywords internal
+#' @noRd
+.harmonize_transactions_threeway <- function(watershed_txns, api_ledger, csv_ledger) {
+
+  # Start with whichever source has data
+  if (is.null(watershed_txns) || nrow(watershed_txns) == 0) {
+    if (is.null(api_ledger) || nrow(api_ledger) == 0) {
+      return(csv_ledger)
+    }
+    if (is.null(csv_ledger) || nrow(csv_ledger) == 0) {
+      return(api_ledger)
+    }
+    # Fall back to 2-way merge if no watershed
+    return(.harmonize_transactions(api_ledger, csv_ledger, priority = "csv"))
+  }
+
+  # STEP 1: Normalize all sources using column registry
+  watershed_std <- .normalize_columns(watershed_txns)
+  api_std <- if (!is.null(api_ledger) && nrow(api_ledger) > 0) {
+    .normalize_columns(api_ledger) |>
+      dplyr::rename_with(~ gsub("_list$", "", .x))  # credit_type_list -> credit_type
+  } else {
+    NULL
+  }
+  csv_std <- if (!is.null(csv_ledger) && nrow(csv_ledger) > 0) {
+    .normalize_columns(csv_ledger) |>
+      dplyr::rename_with(~ dplyr::case_when(
+        .x == "name" ~ "bank_name",
+        .x == "type" ~ "entity_type",
+        .x == "parent_transaction_id" ~ "transaction_id",
+        .x == "comment" ~ "notes",
+        TRUE ~ .x
+      ))
+  } else {
+    NULL
+  }
+
+  # STEP 2: Start with watershed as foundation
+  unified <- watershed_std
+
+  # STEP 3: Add API ledger fields (if available)
+  if (!is.null(api_std)) {
+    # Try to merge on both bank_id and transaction_id if available
+    # Otherwise fall back to just bank_id
+    merge_keys <- c("bank_id")
+    if ("transaction_id" %in% names(unified) && "transaction_id" %in% names(api_std)) {
+      merge_keys <- c("bank_id", "transaction_id")
+    }
+
+    unified <- .merge_preserving_columns(
+      unified,
+      api_std,
+      by = merge_keys,
+      suffix = c("", "_api")
+    )
+  }
+
+  # STEP 4: Add CSV ledger fields (if available)
+  if (!is.null(csv_std)) {
+    # Try to merge on both bank_id and transaction_id
+    merge_keys <- c("bank_id")
+    if ("transaction_id" %in% names(unified) && "transaction_id" %in% names(csv_std)) {
+      merge_keys <- c("bank_id", "transaction_id")
+    }
+
+    unified <- .merge_preserving_columns(
+      unified,
+      csv_std,
+      by = merge_keys,
+      suffix = c("", "_csv")
+    )
+  }
+
+  # STEP 5: Fill bank_name gaps using bank_id lookup
+  if ("bank_id" %in% names(unified)) {
+    # First try: Build bank_id -> bank_name mapping from rows that have both
+    if ("bank_name" %in% names(unified)) {
+      known_names <- unified |>
+        dplyr::filter(!is.na(bank_id) & !is.na(bank_name)) |>
+        dplyr::select(bank_id, bank_name) |>
+        dplyr::distinct(bank_id, .keep_all = TRUE)
+
+      if (nrow(known_names) > 0) {
+        unified <- unified |>
+          dplyr::left_join(known_names, by = "bank_id", suffix = c("", "_lookup")) |>
+          dplyr::mutate(bank_name = dplyr::coalesce(bank_name, bank_name_lookup)) |>
+          dplyr::select(-dplyr::any_of("bank_name_lookup"))
+      }
+    }
+
+    # Second try: Use global bank lookup table for remaining gaps
+    if ("bank_name" %in% names(unified)) {
+      missing_names <- is.na(unified$bank_name)
+      if (any(missing_names)) {
+        tryCatch({
+          lookup <- rb_build_name_lookup(include_csv = FALSE, cache = TRUE)
+          if (!is.null(lookup) && nrow(lookup) > 0) {
+            id_to_name <- lookup |>
+              dplyr::select(bank_id, name) |>
+              dplyr::distinct(bank_id, .keep_all = TRUE) |>
+              dplyr::rename(bank_name_global = name)
+
+            unified <- unified |>
+              dplyr::left_join(id_to_name, by = "bank_id") |>
+              dplyr::mutate(bank_name = dplyr::coalesce(bank_name, bank_name_global)) |>
+              dplyr::select(-dplyr::any_of("bank_name_global"))
+          }
+        }, error = function(e) NULL)
+      }
+    }
+  }
+
+  # STEP 6: Clean up source column
+  # Combine sources where multiple contributed
+  if ("source" %in% names(unified)) {
+    unified <- unified |>
+      dplyr::mutate(
+        source = dplyr::case_when(
+          !is.na(source) ~ source,
+          TRUE ~ "unknown"
+        )
+      )
+  }
+
+  unified
+}
+
+
+#' Harmonize transaction data from two sources (LEGACY - for backwards compatibility)
+#'
+#' @keywords internal
+#' @noRd
 .harmonize_transactions <- function(api_ledger, csv_ledger, priority = NULL) {
-  
+
   if (is.null(api_ledger) && is.null(csv_ledger)) {
     return(tibble::tibble())
   }
-  
+
   if (is.null(api_ledger) || nrow(api_ledger) == 0) return(csv_ledger)
   if (is.null(csv_ledger) || nrow(csv_ledger) == 0) return(api_ledger)
-  
+
   # Determine priority
   if (is.null(priority)) {
     config <- .get_discrepancy_config()
-    # Find first relevant source in priority list
     p_sources <- config$source_priority
     if ("csv" %in% p_sources && "api" %in% p_sources) {
       priority <- if (match("csv", p_sources) < match("api", p_sources)) "csv" else "api"
     } else {
-      priority <- "api" # Default fallback
+      priority <- "api"
     }
   }
-  
-  # Standardize API ledger columns
+
+  # Standardize columns
   api_std <- api_ledger |>
-    dplyr::rename_with(~ gsub("_list$", "", .x))  # credit_type_list -> credit_type
-  
-  # Standardize CSV ledger columns
-  # NOTE: CSV "type" = "Bank"/"Program" (entity type), NOT transaction type!
-  # CSV has different structure: sub_ledger_id, permit_auth_date, credit_action
-  # CSV uses parent_transaction_id to link to API transactions
+    dplyr::rename_with(~ gsub("_list$", "", .x))
+
   csv_std <- csv_ledger |>
     dplyr::rename_with(~ dplyr::case_when(
       .x == "name" ~ "bank_name",
       .x == "type" ~ "entity_type",
       .x == "parent_transaction_id" ~ "transaction_id",
-      .x == "sub_ledger_id" ~ "sub_ledger_id",
-      .x == "permit_auth_date" ~ "permit_auth_date",
-      .x == "credit_action" ~ "credit_action",
       .x == "comment" ~ "notes",
       TRUE ~ .x
     ))
-  
-  # Convert all columns to character to avoid type conflicts
+
+  # Convert to character
   api_char <- api_std |> dplyr::mutate(dplyr::across(dplyr::everything(), as.character))
   csv_char <- csv_std |> dplyr::mutate(dplyr::across(dplyr::everything(), as.character))
-  
-  # Gap-filling strategy: For transactions that exist in both sources,
-  # coalesce fields based on priority
+
+  # Merge on transaction_id if available
   if ("transaction_id" %in% names(api_char) && "transaction_id" %in% names(csv_char)) {
-    # Find transactions in both sources
     api_ids <- api_char$transaction_id[!is.na(api_char$transaction_id)]
     csv_ids <- csv_char$transaction_id[!is.na(csv_char$transaction_id)]
     common_ids <- intersect(api_ids, csv_ids)
-    
+
     if (length(common_ids) > 0) {
-      # For common transactions, merge and coalesce
       api_common <- api_char |> dplyr::filter(transaction_id %in% common_ids)
       csv_common <- csv_char |> dplyr::filter(transaction_id %in% common_ids)
-      
-      # Get all unique columns
+
       all_cols <- union(names(api_common), names(csv_common))
-      
-      # Add missing columns to each
+
       for (col in setdiff(all_cols, names(api_common))) {
         api_common[[col]] <- NA_character_
       }
       for (col in setdiff(all_cols, names(csv_common))) {
         csv_common[[col]] <- NA_character_
       }
-      
-      # Join (keeping api as left to preserve row order initially, but we'll coalesce carefully)
+
       merged_common <- dplyr::left_join(
-        api_common, csv_common, 
-        by = "transaction_id", 
+        api_common, csv_common,
+        by = "transaction_id",
         suffix = c("", "_csv")
       )
-      
-      # Coalesce each column based on priority
+
       for (col in all_cols) {
         if (col == "transaction_id") next
-        
+
         csv_col <- paste0(col, "_csv")
-        
+
         if (csv_col %in% names(merged_common)) {
-          # Define values
           val_api <- merged_common[[col]]
           val_csv <- merged_common[[csv_col]]
-          
-          # Coalesce
+
           if (priority == "csv") {
-             merged_common[[col]] <- dplyr::coalesce(val_csv, val_api)
+            merged_common[[col]] <- dplyr::coalesce(val_csv, val_api)
           } else {
-             merged_common[[col]] <- dplyr::coalesce(val_api, val_csv)
+            merged_common[[col]] <- dplyr::coalesce(val_api, val_csv)
           }
-          
+
           merged_common <- merged_common |> dplyr::select(-dplyr::all_of(csv_col))
         }
       }
-      
-      # Mark source as combined
+
       merged_common$source <- "api+csv"
-      
-      # Get transactions unique to each source
+
       api_only <- api_char |> dplyr::filter(!transaction_id %in% common_ids | is.na(transaction_id))
       csv_only <- csv_char |> dplyr::filter(!transaction_id %in% common_ids | is.na(transaction_id))
-      
-      # Combine all
+
       combined <- dplyr::bind_rows(merged_common, api_only, csv_only)
     } else {
-      # No common transactions, just bind
       combined <- dplyr::bind_rows(api_char, csv_char)
     }
   } else {
-    # No transaction_id to match on, just bind
     combined <- dplyr::bind_rows(api_char, csv_char)
   }
-  
-  # Final deduplication by transaction_id (for any remaining duplicates)
+
+  # Deduplication
   if ("transaction_id" %in% names(combined) && any(!is.na(combined$transaction_id))) {
     combined <- combined |>
       dplyr::arrange(transaction_id, dplyr::desc(source == "api+csv"), dplyr::desc(source == priority)) |>
       dplyr::distinct(transaction_id, .keep_all = TRUE)
   }
-  
-  # Fill bank_name gaps using bank_id lookup
-  # API has bank_id but not bank_name; CSV has bank_name but needs bank_id matching
-  if ("bank_id" %in% names(combined)) {
-    # First try: Build bank_id -> bank_name mapping from rows that have both
-    if ("bank_name" %in% names(combined)) {
-      known_names <- combined |>
-        dplyr::filter(!is.na(bank_id) & !is.na(bank_name)) |>
-        dplyr::select(bank_id, bank_name) |>
-        dplyr::distinct(bank_id, .keep_all = TRUE)
-      
-      if (nrow(known_names) > 0) {
-        combined <- combined |>
-          dplyr::left_join(known_names, by = "bank_id", suffix = c("", "_lookup")) |>
-          dplyr::mutate(bank_name = dplyr::coalesce(bank_name, bank_name_lookup)) |>
-          dplyr::select(-dplyr::any_of("bank_name_lookup"))
-      }
-    }
-    
-    # Second try: Use global bank lookup table for remaining gaps
-    missing_names <- is.na(combined$bank_name) | !("bank_name" %in% names(combined))
-    if (any(missing_names)) {
-      tryCatch({
-        lookup <- rb_build_name_lookup(include_csv = FALSE, cache = TRUE)
-        if (!is.null(lookup) && nrow(lookup) > 0) {
-          # Create bank_id -> name mapping
-          id_to_name <- lookup |>
-            dplyr::select(bank_id, name) |>
-            dplyr::distinct(bank_id, .keep_all = TRUE) |>
-            dplyr::rename(bank_name_global = name)
-          
-          combined <- combined |>
-            dplyr::left_join(id_to_name, by = "bank_id") |>
-            dplyr::mutate(
-              bank_name = if ("bank_name" %in% names(combined)) {
-                dplyr::coalesce(bank_name, bank_name_global)
-              } else {
-                bank_name_global
-              }
-            ) |>
-            dplyr::select(-dplyr::any_of("bank_name_global"))
-        }
-      }, error = function(e) NULL)
+
+  # Fill bank_name gaps
+  if ("bank_id" %in% names(combined) && "bank_name" %in% names(combined)) {
+    known_names <- combined |>
+      dplyr::filter(!is.na(bank_id) & !is.na(bank_name)) |>
+      dplyr::select(bank_id, bank_name) |>
+      dplyr::distinct(bank_id, .keep_all = TRUE)
+
+    if (nrow(known_names) > 0) {
+      combined <- combined |>
+        dplyr::left_join(known_names, by = "bank_id", suffix = c("", "_lookup")) |>
+        dplyr::mutate(bank_name = dplyr::coalesce(bank_name, bank_name_lookup)) |>
+        dplyr::select(-dplyr::any_of("bank_name_lookup"))
     }
   }
-  
+
   combined
 }
 
@@ -385,96 +479,29 @@ rb_transactions <- function(bank_ids = NULL,
 #' @export
 print.ribits_transactions <- function(x, ...) {
   cli::cli_h1("RIBITS Transaction Data")
-  
+
   if (!is.null(x$.meta$fetch_date)) {
     cli::cli_text("Fetched: {.val {x$.meta$fetch_date}}")
   }
-  
+
   cli::cli_h2("Data")
-  
+
   # Transactions
   if (!is.null(x$transactions) && nrow(x$transactions) > 0) {
     src <- x$.meta$sources$transactions %||% "?"
     n_banks <- length(unique(x$transactions$bank_id))
-    cli::cli_alert_success("transactions: {nrow(x$transactions)} rows ({n_banks} banks) [{src}]")
+    n_cols <- ncol(x$transactions)
+    cli::cli_alert_success("transactions: {nrow(x$transactions)} rows ({n_banks} banks, {n_cols} columns) [{src}]")
   } else {
     cli::cli_alert_warning("transactions: none")
   }
-  
-  # Credit summary
-  if (!is.null(x$credit_summary) && nrow(x$credit_summary) > 0) {
-    src <- x$.meta$sources$credit_summary %||% "?"
-    n_banks <- length(unique(x$credit_summary$bank_id))
-    cli::cli_alert_success("credit_summary: {nrow(x$credit_summary)} rows ({n_banks} banks) [{src}]")
-  } else {
-    cli::cli_alert_warning("credit_summary: none")
-  }
-  
+
   cli::cli_h2("Coverage")
   cli::cli_bullets(c(
     "*" = "Banks requested: {x$.meta$coverage$bank_ids_requested}",
     "*" = "With transactions: {x$.meta$coverage$banks_with_transactions}",
-    "*" = "With credit summary: {x$.meta$coverage$banks_with_credit_summary}"
+    "*" = "Total columns: {x$.meta$coverage$total_columns}"
   ))
-  
+
   invisible(x)
-}
-
-
-#' Get credit breakdown by classification type
-#'
-#' Summarizes credits across banks by classification type (wetland, stream, etc.)
-#'
-#' @param data Either a ribits_transactions object or a ribits_data object
-#' @param by_bank If TRUE, breaks down by bank. Default FALSE (totals only).
-#'
-#' @return A tibble with credit summaries
-#' @export
-rb_credit_breakdown <- function(data, by_bank = FALSE) {
-  
-  # Extract credit summary from either object type
-  credit_data <- if (inherits(data, "ribits_transactions")) {
-    data$credit_summary
-  } else if (inherits(data, "ribits_data") && !is.null(data$credit_summary)) {
-    data$credit_summary
-  } else if (is.data.frame(data)) {
-    data
-  } else {
-    cli::cli_abort("Expected ribits_transactions, ribits_data, or data frame")
-  }
-  
-  if (is.null(credit_data) || nrow(credit_data) == 0) {
-    cli::cli_alert_warning("No credit classification data available")
-    return(tibble::tibble())
-  }
-  
-  # Find credit columns
-  credit_cols <- names(credit_data)[grepl("credit", names(credit_data), ignore.case = TRUE)]
-  numeric_cols <- credit_cols[sapply(credit_data[credit_cols], is.numeric)]
-  
-  if (length(numeric_cols) == 0) {
-    cli::cli_alert_warning("No numeric credit columns found")
-    return(tibble::tibble())
-  }
-  
-  # Summarize
-  if (by_bank && "bank_id" %in% names(credit_data)) {
-    result <- credit_data |>
-      dplyr::group_by(bank_id, 
-                      credit_classification = credit_data$credit_classification %||% "unknown") |>
-      dplyr::summarise(
-        dplyr::across(dplyr::all_of(numeric_cols), ~ sum(.x, na.rm = TRUE)),
-        .groups = "drop"
-      )
-  } else {
-    result <- credit_data |>
-      dplyr::group_by(credit_classification = credit_data$credit_classification %||% "unknown") |>
-      dplyr::summarise(
-        dplyr::across(dplyr::all_of(numeric_cols), ~ sum(.x, na.rm = TRUE)),
-        n_banks = dplyr::n_distinct(bank_id),
-        .groups = "drop"
-      )
-  }
-  
-  result
 }

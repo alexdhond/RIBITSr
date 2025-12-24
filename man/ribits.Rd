@@ -9,7 +9,7 @@ ribits(
   state = NULL,
   district = NULL,
   ids = NULL,
-  ledger = TRUE,
+  transactions = c("basic", "comprehensive", "none"),
   spatial = TRUE,
   sources = c("api", "epa", "csv"),
   cache = TRUE,
@@ -30,28 +30,40 @@ ribits(
 
 \item{ids}{Optional vector of specific IDs to retrieve (bank_ids, program_ids, etc.)}
 
-\item{ledger}{Include transaction/credit ledger data? Default TRUE (banks only).}
-
-\item{spatial}{Include footprint and service area geometries? Default TRUE.}
-
-\item{sources}{Which data sources to use. Default: all available
+\item{transactions}{Level of transaction data to include (banks only):
 \itemize{
-\item "api" = RIBITS API only (fast, real-time)
-\item "epa" = EPA ArcGIS only (spatial data)
-\item "csv" = Direct CSV downloads (official records)
-\item c("api", "epa", "csv") = All sources (recommended, default)
-}}
+\item "none": No transaction data (fastest)
+\item "basic" (default): API ledger only (~20 columns, fast, real-time data)
+\item "comprehensive": Full 3-source harmonization (~85 columns, slower but most complete)
+}
 
-\item{cache}{Cache downloaded CSV files? Default TRUE.}
+The "comprehensive" option merges data from watershed CSV, API ledger, and CSV reports.
+Use "basic" for quick queries, "comprehensive" for data analysis requiring maximum detail.}
+
+\item{spatial}{Include spatial data (footprints and service area geometries)? Default TRUE.
+Set to FALSE for faster queries when you only need bank attributes.}
+
+\item{sources}{Which data sources to use. Default: c("api", "epa", "csv") (all sources).
+\itemize{
+\item "api" = RIBITS API only (fastest, real-time, ~30 seconds)
+\item "epa" = EPA ArcGIS only (spatial data)
+\item "csv" = Direct CSV downloads (official records, slow)
+\item c("api", "epa", "csv") = All sources (recommended for accuracy, ~60-90 seconds)
+}
+
+Using all sources provides the most complete and accurate data. If a source fails,
+the package automatically falls back to other sources.}
+
+\item{cache}{Cache downloaded CSV files to temp directory? Default TRUE.
+Significantly speeds up repeated queries. Cache is cleared when R session ends.}
 
 \item{quietly}{Suppress progress messages? Default FALSE.}
 }
 \value{
 A \code{ribits_data} object containing:
 \item{banks/programs/umbrellas}{Summary data (tibble)}
-\item{ledger}{Transaction/credit tracking data (tibble, banks only)}
-\item{footprints}{Footprint geometries (sf object)}
-\item{service_areas}{Service area geometries (sf object)}
+\item{transactions}{Transaction/credit tracking data (tibble, banks only)}
+\item{geometry}{Spatial data including footprints and service areas (sf object)}
 \item{.meta}{Metadata including sources used and any discrepancies}
 }
 \description{
@@ -73,8 +85,11 @@ ca <- ribits(state = "CA")
 
 # Access the data
 ca$banks           # Summary data
-ca$ledger          # Transaction history
-ca$footprints      # Spatial polygons
+ca$transactions    # Transaction history
+ca$geometry        # Spatial polygons
+
+# Get comprehensive transaction data (3-source harmonization, ~85 columns)
+ca_full <- ribits(state = "CA", transactions = "comprehensive")
 
 # Get ILF programs
 ilf <- ribits(type = "ilf", state = "TX")
@@ -85,8 +100,8 @@ umb <- ribits(type = "umbrellas", state = "FL")
 # Get specific banks by ID
 my_banks <- ribits(ids = c(17, 100, 345))
 
-# Just summary data, no spatial (faster)
-summary <- ribits(state = "OR", spatial = FALSE, ledger = FALSE)
+# Just summary data, no spatial or transactions (fastest)
+summary <- ribits(state = "OR", spatial = FALSE, transactions = "none")
 
 # Only use API source (fastest, real-time)
 api_only <- ribits(state = "TX", sources = "api")

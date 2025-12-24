@@ -2,7 +2,7 @@
 % Please edit documentation in R/network.R
 \name{rb_checkpoints}
 \alias{rb_checkpoints}
-\title{List available checkpoints}
+\title{List available checkpoints (Internal)}
 \usage{
 rb_checkpoints()
 }
@@ -10,11 +10,13 @@ rb_checkpoints()
 A tibble of available checkpoints
 }
 \description{
+This function is internal. Checkpointing is handled automatically.
+
 Shows checkpoints from interrupted operations that can be resumed.
 }
 \examples{
 \dontrun{
-# See what can be resumed
 rb_checkpoints()
 }
 }
+\keyword{internal}

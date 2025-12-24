@@ -2,7 +2,7 @@
 % Please edit documentation in R/network.R
 \name{rb_network_failures}
 \alias{rb_network_failures}
-\title{View network failure log}
+\title{View network failure log (Internal)}
 \usage{
 rb_network_failures(clear = FALSE)
 }
@@ -13,14 +13,14 @@ rb_network_failures(clear = FALSE)
 A tibble of network failures
 }
 \description{
+This function is internal. Network failures are logged automatically.
+
 Shows all network failures that occurred during the session.
 }
 \examples{
 \dontrun{
-# View failures
 rb_network_failures()
-
-# View and clear
 rb_network_failures(clear = TRUE)
 }
 }
+\keyword{internal}

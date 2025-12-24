@@ -2,7 +2,7 @@
 % Please edit documentation in R/reports.R
 \name{rb_download_report}
 \alias{rb_download_report}
-\title{Download a standard RIBITS report}
+\title{Download a standard RIBITS report (Internal)}
 \usage{
 rb_download_report(
   report_type,
@@ -12,7 +12,7 @@ rb_download_report(
 )
 }
 \arguments{
-\item{report_type}{Character. The type of report to download. See \code{rb_reports()}.}
+\item{report_type}{Character. The type of report to download.}
 
 \item{download_dir}{Directory to save the file. If NULL (default), uses a temporary directory.}
 
@@ -24,6 +24,8 @@ rb_download_report(
 The path to the downloaded CSV file.
 }
 \description{
+This function is internal and called automatically by \code{ribits()} and \code{rb_read()}.
+
 Downloads a CSV report directly from RIBITS using the Oracle APEX API.
 This function bypasses the need for a browser or manual navigation.
 }
@@ -36,3 +38,4 @@ file <- rb_download_report("banks_sites")
 file <- rb_download_report("ledger_transactions")
 }
 }
+\keyword{internal}

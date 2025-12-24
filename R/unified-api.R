@@ -6,10 +6,23 @@
 # UNIFIED DATA RETRIEVAL FUNCTION
 # =============================================================================
 
-#' Get RIBITS data with flexible filtering
+#' Get RIBITS data with flexible filtering (Advanced)
 #'
-#' Unified function to retrieve banks, ILF programs, umbrellas, or WQT projects
-#' from the RIBITS API with comprehensive filtering options.
+#' @description
+#' Advanced API function for power users who need fine-grained control over
+#' data retrieval from the RIBITS API.
+#'
+#' **For most users:** Use `ribits()` instead, which automatically harmonizes
+#' data from multiple sources and handles all complexity.
+#'
+#' **Use `rb_get()` when you need:**
+#' - Raw API data without harmonization
+#' - Specific filters not available in `ribits()` (field_office, noaa_region, kind)
+#' - WQT project data
+#' - Fine-grained control over which components to fetch
+#'
+#' This function queries the RIBITS API directly and returns data as-is, without
+#' the multi-source harmonization that `ribits()` provides.
 #'
 #' @param type Data type to retrieve. One of: "banks", "ilf", "umbrellas", "wqt"
 #' @param id Optional. Specific ID(s) to retrieve detailed data for.
@@ -17,27 +30,32 @@
 #' @param district USACE district filter (e.g., "Portland", "Sacramento")
 #' @param field_office FWS field office filter
 #' @param noaa_region NOAA region filter
-#' @param kind Bank type filter: "Standard", "ILF", "Umbrella", "NRDA" (banks only
+#' @param kind Bank type filter: "Standard", "ILF", "Umbrella", "NRDA" (banks only)
 #' @param status Bank status filter: "Approved", "Pending", "Terminated"
 #' @param ledger Include ledger/transaction data? Default FALSE.
 #' @param footprint Include footprint geometry? Default FALSE.
 #' @param service_area Include service area geometry? Default FALSE.
 #' @param contacts Include contact information? Default FALSE.
 #' @return A tibble or list depending on what's requested
+#' @seealso [ribits()] for the recommended user-friendly interface
 #' @export
 #' @examples
 #' \dontrun{
-#' # List all Oregon banks
+#' # Recommended: Use ribits() for most tasks
+#' ca_banks <- ribits(state = "CA")
+#'
+#' # Advanced: Use rb_get() for specific filters
+#' # List all Oregon banks from API only
 #' rb_get("banks", state = "OR")
 #'
-#' # Get specific bank with all data
+#' # Get specific bank with all data (API only, no harmonization)
 #' rb_get("banks", id = 17, ledger = TRUE, footprint = TRUE)
 #'
-#' # List California ILF programs
-#' rb_get("ilf", state = "CA")
+#' # Filter by field office (not available in ribits())
+#' rb_get("banks", field_office = "Sacramento")
 #'
-#' # Get all approved conservation banks in Portland district
-#' rb_get("banks", district = "Portland", status = "Approved")
+#' # Get WQT projects (not available in ribits())
+#' rb_get("wqt", state = "CA")
 #'
 #' # Show available options
 #' rb_get()
@@ -365,7 +383,10 @@ rb_get <- function(type = NULL,
 # UNIFIED EPA ARCGIS FUNCTION  
 # =============================================================================
 
-#' Query EPA ArcGIS for RIBITS spatial data
+#' Query EPA ArcGIS for RIBITS spatial data (Internal)
+#'
+#' @description
+#' This function is internal and called automatically by `ribits()`.
 #'
 #' Unified function to query any EPA ArcGIS layer. Replaces the individual
 #' rb_epa_* functions with a single flexible interface.
@@ -385,7 +406,7 @@ rb_get <- function(type = NULL,
 #' @param kind Optional bank type filter: "Standard", "ILF", "Umbrella", "NRDA"
 #' @param where Optional custom SQL WHERE clause (overrides other filters)
 #' @return An sf object with the queried features
-#' @export
+#' @keywords internal
 #' @examples
 #' \dontrun{
 #' # Get Oregon banks

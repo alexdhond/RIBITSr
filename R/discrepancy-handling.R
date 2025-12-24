@@ -598,38 +598,16 @@ rb_export_discrepancies <- function(data, file_path = "ribits_discrepancies.csv"
 .merge_preserving_columns <- function(df1, df2, by = "bank_id", suffix = c("_1", "_2")) {
   if (is.null(df1) || nrow(df1) == 0) return(df2)
   if (is.null(df2) || nrow(df2) == 0) return(df1)
- 
-  # Normalize column names to lowercase for consistent merging
+
+  # STEP 1: Normalize columns using registry
+  # This handles semantic equivalents and standardizes naming
+  df1 <- .normalize_columns(df1)
+  df2 <- .normalize_columns(df2)
+
+  # STEP 2: Normalize column names to lowercase for consistent merging
   names(df1) <- tolower(names(df1))
   names(df2) <- tolower(names(df2))
   by <- tolower(by)
-  
-  # Define semantic equivalents (columns that mean the same thing)
-  # Format: canonical_name = c(alternative_names)
-  # Use type-specific names as canonical (bank_name for banks, not generic "name")
-  semantic_equivalents <- list(
-    bank_name = c("name"),
-    bank_status = c("bank_status_2"),
-    bank_type = c("bank_type_2", "kind_of_bank"),
-    state_abbrev_list = c("state_list"),
-    year_bank_approved = c("year_established")
-  )
-  
-  # Rename equivalent columns in df2 to match df1's canonical names
-  for (canonical in names(semantic_equivalents)) {
-    alts <- semantic_equivalents[[canonical]]
-    # If df1 has canonical but df2 has an alternative, rename df2's alt
-    if (canonical %in% names(df1)) {
-      for (alt in alts) {
-        if (alt %in% names(df2) && !(canonical %in% names(df2))) {
-          names(df2)[names(df2) == alt] <- canonical
-        } else if (alt %in% names(df2) && canonical %in% names(df2)) {
-          # Both exist - drop the alternative to avoid duplication
-          df2 <- df2 |> dplyr::select(-dplyr::all_of(alt))
-        }
-      }
-    }
-  }
   
   # Remove columns that are just logical indicators for nested data
   # (these indicate presence of data, not actual data)

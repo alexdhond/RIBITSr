@@ -131,7 +131,10 @@ rb_epa_query <- function(layer,
   tryCatch({
     result <- sf::st_read(geojson, quiet = TRUE)
 
-    # Note: We preserve original column names here - clean_names() is applied at final output
+    # Clean column names immediately to avoid case-insensitive lookups
+    if (ncol(result) > 0) {
+      result <- janitor::clean_names(result)
+    }
 
     cli::cli_alert_success("Retrieved {nrow(result)} features from EPA ArcGIS")
     return(result)
@@ -182,28 +185,28 @@ rb_spatial_availability <- function(bank_ids = NULL, state = NULL, quietly = FAL
     ))
   }
   
-  # Get bank_id column (case-insensitive)
-  id_col <- names(banks)[tolower(names(banks)) == "bank_id"][1]
+  # Get bank_id column
+  id_col <- .get_column_case_insensitive(banks, "bank_id")
   all_bank_ids <- banks[[id_col]]
   if (!quietly) cli::cli_alert_success("Found {length(all_bank_ids)} banks (all have centroids)")
-  
+
   # Get bank IDs that have footprints (query by bank_id, not state)
   if (!quietly) cli::cli_progress_step("Checking footprint availability...")
   fp_banks <- tryCatch({
     fp <- rb_epa_query("bank_footprints", bank_ids = all_bank_ids,
                         out_fields = "BANK_ID", return_geometry = FALSE)
-    fp_id_col <- names(fp)[tolower(names(fp)) == "bank_id"][1]
+    fp_id_col <- .get_column_case_insensitive(fp, "bank_id")
     unique(fp[[fp_id_col]])
   }, error = function(e) integer())
-  
+
   if (!quietly) cli::cli_alert_success("{length(fp_banks)} banks have footprints")
-  
+
   # Get bank IDs that have service areas (query by bank_id, not state)
   if (!quietly) cli::cli_progress_step("Checking service area availability...")
   sa_banks <- tryCatch({
     sa <- rb_epa_query("bank_service_areas", bank_ids = all_bank_ids,
                         out_fields = "BANK_ID", return_geometry = FALSE)
-    sa_id_col <- names(sa)[tolower(names(sa)) == "bank_id"][1]
+    sa_id_col <- .get_column_case_insensitive(sa, "bank_id")
     unique(sa[[sa_id_col]])
   }, error = function(e) integer())
   

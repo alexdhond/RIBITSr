@@ -1,18 +1,21 @@
 # R/reports.R
 # Direct download functions for RIBITS reports
 
-#' Download a standard RIBITS report
+#' Download a standard RIBITS report (Internal)
+#'
+#' @description
+#' This function is internal and called automatically by `ribits()` and `rb_read()`.
 #'
 #' Downloads a CSV report directly from RIBITS using the Oracle APEX API.
 #' This function bypasses the need for a browser or manual navigation.
 #'
-#' @param report_type Character. The type of report to download. See `rb_reports()`.
+#' @param report_type Character. The type of report to download.
 #' @param download_dir Directory to save the file. If NULL (default), uses a temporary directory.
 #' @param filename Optional custom filename. If NULL, generates one based on report name and date.
 #' @param reset_filters Logical. If TRUE (default), attempts to reset report filters to default (RIR).
 #'
 #' @return The path to the downloaded CSV file.
-#' @export
+#' @keywords internal
 #' @examples
 #' \dontrun{
 #' # Download the Banks & Sites report
@@ -96,7 +99,10 @@ rb_download_report <- function(report_type,
   })
 }
 
-#' Get information about CSV reports
+#' Get information about CSV reports (Internal)
+#'
+#' @description
+#' This function is internal. Use `rb_info()` to explore available data sources.
 #'
 #' Unified function for exploring available RIBITS CSV reports.
 #'
@@ -105,7 +111,7 @@ rb_download_report <- function(report_type,
 #'   - "structure": Show which reports are safe to merge
 #'   - A specific report type name: Show detailed info about that report
 #' @return A tibble (for "types") or printed info (for "structure" or specific report)
-#' @export
+#' @keywords internal
 #' @examples
 #' \dontrun{
 #' # List all report types

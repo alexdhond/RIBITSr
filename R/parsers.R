@@ -64,9 +64,12 @@ rb_read <- function(path, type = NULL) {
     
     # Read CSV with appropriate skip
     data <- readr::read_csv(path, skip = skip_rows, show_col_types = FALSE)
-    
-    # Note: We preserve original column names here - clean_names() is applied at final output
-    
+
+    # Clean column names immediately to avoid case-insensitive lookups
+    if (ncol(data) > 0) {
+      data <- janitor::clean_names(data)
+    }
+
     # Try to extract bank_id from name if not present
     if (!"bank_id" %in% names(data) && "name" %in% names(data)) {
       # Many RIBITS names contain the bank ID in parentheses at end
@@ -76,7 +79,7 @@ rb_read <- function(path, type = NULL) {
           bank_id = as.integer(stringr::str_extract(.data$name, "\\d+$"))
         )
     }
-    
+
     data
   }, error = function(e) {
     rlang::abort(paste("Failed to parse CSV:", e$message))

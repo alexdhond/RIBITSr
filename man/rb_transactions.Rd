@@ -2,15 +2,13 @@
 % Please edit documentation in R/harmonize-transactions.R
 \name{rb_transactions}
 \alias{rb_transactions}
-\title{Get harmonized ledger/transaction data}
+\title{Get harmonized transaction data (Internal)}
 \usage{
 rb_transactions(
   bank_ids = NULL,
   state = NULL,
   district = NULL,
-  sources = c("api", "csv"),
-  include_credit_class = TRUE,
-  progress = TRUE,
+  include_detailed = TRUE,
   cache_dir = NULL
 )
 }
@@ -21,35 +19,35 @@ rb_transactions(
 
 \item{district}{Optional district filter}
 
-\item{sources}{Which sources to use. Default all: c("api", "csv")}
-
-\item{include_credit_class}{Include credit classification summary? Default TRUE.}
-
-\item{progress}{Show progress. Default TRUE.}
+\item{include_detailed}{If TRUE, returns transactions. If FALSE, returns NULL (for summary integration). Default TRUE.}
 
 \item{cache_dir}{Directory for CSV cache. Default tempdir().}
 }
 \value{
-A list with:
-\item{transactions}{Harmonized transaction-level data}
-\item{credit_summary}{Credit classification summary by bank}
-\item{.meta}{Metadata about sources and coverage}
+If include_detailed=TRUE: A list with transactions and metadata.
+If include_detailed=FALSE: NULL (used when only summaries needed in banks dataframe)
 }
 \description{
-Combines transaction data from multiple sources to maximize coverage:
+This function is now internal. Use \code{ribits(transactions = "comprehensive")} instead.
+
+Combines transaction data from three sources to maximize coverage and columns:
 \itemize{
-\item RIBITS API ledger (real-time, per-bank)
-\item Ledger Transactions CSV (bulk download, additional fields)
-\item Credit Classification CSV (aggregated credit summaries)
+\item Transactions by Watershed CSV (foundation - 71 columns, has native bank_id)
+\item RIBITS API ledger (gap-filling, real-time, unique fields like transaction_id)
+\item Ledger Transactions CSV (additional fields like sub_ledger_id, permit_auth_date)
 }
+
+This function uses transactions_watershed as the primary source since it has the most
+comprehensive data (71 columns) and includes bank_id natively (no name matching needed).
 }
 \examples{
 \dontrun{
-# Get all transactions for Washington banks
-wa_txns <- rb_transactions(state = "WA")
+# Recommended: Use ribits() instead
+ca <- ribits(state = "CA", transactions = "comprehensive")
 
-# Access data
-wa_txns$transactions     # Individual transactions
-wa_txns$credit_summary   # Credit totals by classification
+# Internal usage (advanced)
+wa_txns <- rb_transactions(state = "WA")
+wa_txns$transactions
 }
 }
+\keyword{internal}

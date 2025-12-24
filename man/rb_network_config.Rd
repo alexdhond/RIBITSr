@@ -2,7 +2,7 @@
 % Please edit documentation in R/network.R
 \name{rb_network_config}
 \alias{rb_network_config}
-\title{Configure network settings}
+\title{Configure network settings (Internal)}
 \usage{
 rb_network_config(
   max_retries = NULL,
@@ -31,10 +31,13 @@ are saved to a temp directory. Set to FALSE to disable checkpointing.}
 Invisibly returns current settings
 }
 \description{
+This function is internal. Network settings have sensible defaults.
+
 Set package-wide options for network behavior including retries,
 timeouts, and checkpointing.
 }
 \examples{
+\dontrun{
 # Increase retries for unreliable connection
 rb_network_config(max_retries = 5, timeout = 60)
 
@@ -44,3 +47,5 @@ rb_network_config(checkpoint_dir = "data/checkpoints")
 # Disable checkpointing
 rb_network_config(checkpoint_dir = FALSE)
 }
+}
+\keyword{internal}

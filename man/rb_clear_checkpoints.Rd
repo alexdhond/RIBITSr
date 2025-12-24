@@ -2,10 +2,11 @@
 % Please edit documentation in R/network.R
 \name{rb_clear_checkpoints}
 \alias{rb_clear_checkpoints}
-\title{Clear all checkpoints}
+\title{Clear all checkpoints (Internal)}
 \usage{
 rb_clear_checkpoints()
 }
 \description{
-Clear all checkpoints
+This function is internal. Checkpoints are cleared automatically on success.
 }
+\keyword{internal}

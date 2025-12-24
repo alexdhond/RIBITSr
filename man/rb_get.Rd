@@ -2,7 +2,7 @@
 % Please edit documentation in R/unified-api.R
 \name{rb_get}
 \alias{rb_get}
-\title{Get RIBITS data with flexible filtering}
+\title{Get RIBITS data with flexible filtering (Advanced)}
 \usage{
 rb_get(
   type = NULL,
@@ -32,7 +32,7 @@ rb_get(
 
 \item{noaa_region}{NOAA region filter}
 
-\item{kind}{Bank type filter: "Standard", "ILF", "Umbrella", "NRDA" (banks only}
+\item{kind}{Bank type filter: "Standard", "ILF", "Umbrella", "NRDA" (banks only)}
 
 \item{status}{Bank status filter: "Approved", "Pending", "Terminated"}
 
@@ -48,24 +48,45 @@ rb_get(
 A tibble or list depending on what's requested
 }
 \description{
-Unified function to retrieve banks, ILF programs, umbrellas, or WQT projects
-from the RIBITS API with comprehensive filtering options.
+Advanced API function for power users who need fine-grained control over
+data retrieval from the RIBITS API.
+
+\strong{For most users:} Use \code{ribits()} instead, which automatically harmonizes
+data from multiple sources and handles all complexity.
+
+\strong{Use \code{rb_get()} when you need:}
+\itemize{
+\item Raw API data without harmonization
+\item Specific filters not available in \code{ribits()} (field_office, noaa_region, kind)
+\item WQT project data
+\item Fine-grained control over which components to fetch
+}
+
+This function queries the RIBITS API directly and returns data as-is, without
+the multi-source harmonization that \code{ribits()} provides.
 }
 \examples{
 \dontrun{
-# List all Oregon banks
+# Recommended: Use ribits() for most tasks
+ca_banks <- ribits(state = "CA")
+
+# Advanced: Use rb_get() for specific filters
+# List all Oregon banks from API only
 rb_get("banks", state = "OR")
 
-# Get specific bank with all data
+# Get specific bank with all data (API only, no harmonization)
 rb_get("banks", id = 17, ledger = TRUE, footprint = TRUE)
 
-# List California ILF programs
-rb_get("ilf", state = "CA")
+# Filter by field office (not available in ribits())
+rb_get("banks", field_office = "Sacramento")
 
-# Get all approved conservation banks in Portland district
-rb_get("banks", district = "Portland", status = "Approved")
+# Get WQT projects (not available in ribits())
+rb_get("wqt", state = "CA")
 
 # Show available options
 rb_get()
 }
+}
+\seealso{
+\code{\link[=ribits]{ribits()}} for the recommended user-friendly interface
 }

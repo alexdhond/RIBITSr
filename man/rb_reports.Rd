@@ -2,7 +2,7 @@
 % Please edit documentation in R/reports.R
 \name{rb_reports}
 \alias{rb_reports}
-\title{Get information about CSV reports}
+\title{Get information about CSV reports (Internal)}
 \usage{
 rb_reports(what = "types")
 }
@@ -18,6 +18,8 @@ rb_reports(what = "types")
 A tibble (for "types") or printed info (for "structure" or specific report)
 }
 \description{
+This function is internal. Use \code{rb_info()} to explore available data sources.
+
 Unified function for exploring available RIBITS CSV reports.
 }
 \examples{
@@ -32,3 +34,4 @@ rb_reports("structure")
 rb_reports("credit_classification")
 }
 }
+\keyword{internal}
