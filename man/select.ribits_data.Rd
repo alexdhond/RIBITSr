@@ -4,7 +4,7 @@
 \alias{select.ribits_data}
 \title{Select columns from ribits_data objects}
 \usage{
-select.ribits_data(.data, ...)
+\method{select}{ribits_data}(.data, ...)
 }
 \arguments{
 \item{.data}{A ribits_data object}

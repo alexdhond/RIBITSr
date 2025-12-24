@@ -908,7 +908,8 @@ subset.ribits_data <- function(x, bank_ids, ...) {
 #' @param ... Filter expressions passed to dplyr::filter()
 #'
 #' @return A filtered ribits_data object
-#' @export
+#' @exportS3Method dplyr::filter
+#' @importFrom dplyr filter
 #'
 #' @examples
 #' \dontrun{
@@ -950,7 +951,8 @@ filter.ribits_data <- function(.data, ...) {
 #' @param ... Arrange expressions passed to dplyr::arrange()
 #'
 #' @return An arranged ribits_data object
-#' @export
+#' @exportS3Method dplyr::arrange
+#' @importFrom dplyr arrange
 #'
 #' @examples
 #' \dontrun{
@@ -971,7 +973,8 @@ arrange.ribits_data <- function(.data, ...) {
 #' @param ... Select expressions passed to dplyr::select()
 #'
 #' @return A ribits_data object with selected columns
-#' @export
+#' @exportS3Method dplyr::select
+#' @importFrom dplyr select
 #'
 #' @examples
 #' \dontrun{
@@ -992,7 +995,8 @@ select.ribits_data <- function(.data, ...) {
 #' @param ... Mutate expressions passed to dplyr::mutate()
 #'
 #' @return A ribits_data object with mutated columns
-#' @export
+#' @exportS3Method dplyr::mutate
+#' @importFrom dplyr mutate
 #'
 #' @examples
 #' \dontrun{

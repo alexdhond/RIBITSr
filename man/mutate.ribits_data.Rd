@@ -4,7 +4,7 @@
 \alias{mutate.ribits_data}
 \title{Mutate ribits_data objects}
 \usage{
-mutate.ribits_data(.data, ...)
+\method{mutate}{ribits_data}(.data, ...)
 }
 \arguments{
 \item{.data}{A ribits_data object}

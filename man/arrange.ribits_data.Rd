@@ -4,7 +4,7 @@
 \alias{arrange.ribits_data}
 \title{Arrange ribits_data objects}
 \usage{
-arrange.ribits_data(.data, ...)
+\method{arrange}{ribits_data}(.data, ...)
 }
 \arguments{
 \item{.data}{A ribits_data object}

@@ -4,7 +4,7 @@
 \alias{filter.ribits_data}
 \title{Filter ribits_data objects}
 \usage{
-filter.ribits_data(.data, ...)
+\method{filter}{ribits_data}(.data, ...)
 }
 \arguments{
 \item{.data}{A ribits_data object}
