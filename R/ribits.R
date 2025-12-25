@@ -13,6 +13,7 @@
                     sources = c("api", "epa", "csv"),
                     include_detailed_contacts = FALSE,
                     include_detailed_transactions = FALSE,
+                    include_summaries = TRUE,
                     cache = TRUE,
                     quietly = FALSE) {
 
@@ -184,16 +185,15 @@
     if (!quietly) cli::cli_progress_step("Downloading CSV reports...")
 
     banks_csv <- tryCatch({
-      # Use temporary cache directory if caching enabled
-      cache_dir <- if (cache) file.path(tempdir(), "ribits_cache") else tempdir()
-      dir.create(cache_dir, showWarnings = FALSE, recursive = TRUE)
+      # Use cache directory
+      cache_dir <- .get_cache_dir(cache)
 
       # Download bank summary CSV directly
       csv_file <- rb_download_report("banks_sites", download_dir = cache_dir)
 
       # Read CSV
       banks <- rb_read(csv_file)
-      
+
       # CSV column names differ from API/EPA - handle variations
       # state_abbrev_list -> filter by state
       if (!is.null(state)) {
@@ -202,35 +202,9 @@
           banks <- banks |> dplyr::filter(grepl(!!state, .data[[state_col]]))
         }
       }
-      
-      # Add bank_id via name matching (CSV doesn't have bank_id natively)
-      # Check if bank_id exists AND has MOSTLY valid values (rb_read may extract wrong IDs from names)
-      # Require >50% valid bank_ids to skip name matching
-      has_valid_bank_id <- "bank_id" %in% names(banks) && 
-        (sum(!is.na(banks$bank_id)) / nrow(banks)) > 0.5
-      
-      if (!has_valid_bank_id) {
-        name_col <- names(banks)[grepl("^name$|bank.?name", names(banks), ignore.case = TRUE)][1]
-        if (!is.na(name_col)) {
-          if (!quietly) cli::cli_alert_info("Matching CSV names to bank IDs...")
-          # Remove any existing empty bank_id column before matching
-          if ("bank_id" %in% names(banks)) {
-            banks <- banks |> dplyr::select(-bank_id)
-          }
-          lookup <- rb_build_name_lookup(include_csv = FALSE, cache = TRUE)
-          banks <- rb_match_names(banks, lookup, name_col = name_col, fuzzy = TRUE)
 
-          # Remove unmatched rows for harmonization
-          id_col <- .get_column_case_insensitive(banks, "bank_id")
-          n_unmatched <- if (!is.na(id_col)) sum(is.na(banks[[id_col]])) else 0
-          if (n_unmatched > 0 && !quietly) {
-            cli::cli_alert_warning("{n_unmatched} CSV rows couldn't be matched to bank_id")
-          }
-          if (!is.na(id_col)) {
-            banks <- banks |> dplyr::filter(!is.na(.data[[id_col]]))
-          }
-        }
-      }
+      # Ensure bank_id exists (CSV doesn't have bank_id natively)
+      banks <- .ensure_bank_id(banks, quietly = quietly)
 
       # Filter by bank_ids if specified
       if (!is.null(bank_ids)) {
@@ -240,7 +214,7 @@
       if (!quietly && nrow(banks) > 0) {
         cli::cli_alert_success("{nrow(banks)} banks from CSV")
       }
-      
+
       banks
     }, error = function(e) {
       if (!quietly) cli::cli_alert_warning("CSV fetch failed: {e$message}")
@@ -338,28 +312,11 @@
   # ==========================================================================
   credit_class_detailed <- NULL
   if (use_csv) {
-    credit_class_detailed <- tryCatch({
-      cache_dir <- if (cache) file.path(tempdir(), "ribits_cache") else tempdir()
-      dir.create(cache_dir, showWarnings = FALSE, recursive = TRUE)
-
-      cc_file <- rb_download_report("credit_classification", download_dir = cache_dir)
-      data <- rb_read(cc_file)
-
-      # Match to bank_ids if needed (names already cleaned by rb_read)
-      if (!"bank_id" %in% names(data) && "bank_name" %in% names(data)) {
-        lookup <- rb_build_name_lookup(include_csv = FALSE, cache = TRUE)
-        data <- rb_match_names(data, lookup, name_col = "bank_name", fuzzy = TRUE)
-      }
-
-      if ("bank_id" %in% names(data)) {
-        data <- data |> dplyr::filter(bank_id %in% query_ids)
-      }
-
-      data
-    }, error = function(e) {
-      if (!quietly) cli::cli_alert_warning("Credit classification failed: {e$message}")
-      NULL
-    })
+    credit_class_detailed <- .safe_fetch(
+      fn = function() .fetch_csv_with_bank_id("credit_classification", query_ids, cache, quietly),
+      description = "Credit classification",
+      quietly = quietly
+    )
 
     if (!quietly && !is.null(credit_class_detailed) && nrow(credit_class_detailed) > 0) {
       cli::cli_alert_success("{nrow(credit_class_detailed)} credit classifications")
@@ -367,28 +324,79 @@
   }
 
   # ==========================================================================
+  # Step 3b: Fetch additional CSV reports for summaries (if requested)
+  # ==========================================================================
+  credit_releases_detailed <- NULL
+  public_notices_detailed <- NULL
+
+  if (include_summaries && use_csv) {
+    # Fetch credit releases (anticipated future releases)
+    credit_releases_detailed <- .safe_fetch(
+      fn = function() .fetch_csv_with_bank_id("credit_releases", query_ids, cache, quietly),
+      description = "Credit releases",
+      quietly = TRUE  # Don't warn if not available
+    )
+
+    # Fetch public notices
+    public_notices_detailed <- .safe_fetch(
+      fn = function() .fetch_csv_with_bank_id("public_notices", query_ids, cache, quietly),
+      description = "Public notices",
+      quietly = TRUE  # Don't warn if not available
+    )
+  }
+
+  # ==========================================================================
   # Step 4: Create summaries and merge into banks
   # ==========================================================================
-  if (!quietly) cli::cli_progress_step("Creating contact and credit summaries...")
+  if (!quietly) cli::cli_progress_step("Creating summaries...")
 
-  # Summarize contacts
+  # Create all summaries
   contact_summary <- .summarize_contacts(contacts_detailed)
-
-  # Summarize credits
   credit_summary <- .summarize_credits(credit_class_detailed)
+
+  transaction_summary <- NULL
+  credit_releases_summary <- NULL
+  public_notices_summary <- NULL
+
+  if (include_summaries) {
+    # Transaction summary will be created after transactions are fetched
+    # (see Step 5)
+
+    # Summarize credit releases
+    if (!is.null(credit_releases_detailed) && nrow(credit_releases_detailed) > 0) {
+      credit_releases_summary <- .summarize_credit_releases(credit_releases_detailed)
+    }
+
+    # Summarize public notices
+    if (!is.null(public_notices_detailed) && nrow(public_notices_detailed) > 0) {
+      public_notices_summary <- .summarize_public_notices(public_notices_detailed)
+    }
+  }
 
   # Merge summaries into banks
   if (!is.null(result$banks) && nrow(result$banks) > 0) {
     if (!is.null(contact_summary) && nrow(contact_summary) > 0) {
       result$banks <- result$banks |>
         dplyr::left_join(contact_summary, by = "bank_id")
-      if (!quietly) cli::cli_alert_success("Added contact summaries to banks")
+      if (!quietly) cli::cli_alert_success("Added contact summaries")
     }
 
     if (!is.null(credit_summary) && nrow(credit_summary) > 0) {
       result$banks <- result$banks |>
         dplyr::left_join(credit_summary, by = "bank_id")
-      if (!quietly) cli::cli_alert_success("Added credit summaries to banks")
+      if (!quietly) cli::cli_alert_success("Added credit summaries")
+    }
+
+    if (!is.null(credit_releases_summary) && nrow(credit_releases_summary) > 0) {
+      result$banks <- result$banks |>
+        dplyr::left_join(credit_releases_summary, by = "bank_id")
+      if (!quietly) cli::cli_alert_success("Added anticipated release summaries")
+    }
+
+    if (!is.null(public_notices_summary) && nrow(public_notices_summary) > 0) {
+      result$banks <- result$banks |>
+        dplyr::left_join(public_notices_summary, by = "bank_id")
+      if (!quietly) cli::cli_alert_success("Added public notice summaries")
     }
   }
 
@@ -413,6 +421,16 @@
     if (!is.null(txn_result) && !is.null(txn_result$transactions)) {
       result$transactions <- txn_result$transactions
       result$.meta$sources$transactions <- txn_result$.meta$sources$transactions
+
+      # Create transaction summary and merge into banks
+      if (include_summaries && !is.null(result$banks) && nrow(result$banks) > 0) {
+        transaction_summary <- .summarize_transactions(result$transactions)
+        if (!is.null(transaction_summary) && nrow(transaction_summary) > 0) {
+          result$banks <- result$banks |>
+            dplyr::left_join(transaction_summary, by = "bank_id")
+          if (!quietly) cli::cli_alert_success("Added transaction summaries")
+        }
+      }
     }
   }
 

@@ -6,7 +6,19 @@
 \usage{
 rb_clear_name_cache()
 }
-\description{
-Clear the name lookup cache
+\value{
+Invisibly returns TRUE if cache was deleted, FALSE if no cache existed
 }
-\keyword{internal}
+\description{
+Removes the persistent user cache file. Use this to force a fresh
+fetch on the next call to \code{\link[=rb_build_name_lookup]{rb_build_name_lookup()}}.
+}
+\examples{
+\dontrun{
+# Clear cache to force fresh fetch
+rb_clear_name_cache()
+
+# Next call will fetch from APIs
+lookup <- rb_build_name_lookup()
+}
+}

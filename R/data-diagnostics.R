@@ -537,8 +537,7 @@ rb_diagnose <- function(data = NULL,
       if (verbose) cli::cli_alert_info("Reading local CSV: {csv_path}")
       data <- rb_read(csv_path)
     } else {
-      cache_dir <- file.path(tempdir(), "ribits_cache")
-      if (!dir.exists(cache_dir)) dir.create(cache_dir)
+      cache_dir <- .get_cache_dir(TRUE)
       csv_file <- rb_download_report("ledger_transactions", download_dir = cache_dir)
       data <- rb_read(csv_file)
     }
@@ -546,14 +545,10 @@ rb_diagnose <- function(data = NULL,
     # Filter for our banks
     names(data) <- janitor::make_clean_names(names(data))
 
-    # Try to find bank_id
-    if ("bank_id" %in% names(data)) {
-      data <- data |> dplyr::filter(as.character(bank_id) %in% as.character(bank_ids))
-    } else if ("name" %in% names(data)) {
-       lookup <- rb_build_name_lookup(include_csv = FALSE, cache = TRUE)
-       data <- rb_match_names(data, lookup, name_col = "name", fuzzy = TRUE)
-       data <- data |> dplyr::filter(as.character(bank_id) %in% as.character(bank_ids))
-    }
+    # Ensure bank_id exists and filter
+    data <- .ensure_bank_id(data, quietly = !verbose)
+    data <- .filter_by_bank_ids(data, bank_ids, quietly = !verbose)
+
     data
   }, error = function(e) {
     if (verbose) cli::cli_alert_danger("CSV fetch failed: {e$message}")

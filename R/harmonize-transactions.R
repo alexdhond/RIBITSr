@@ -40,8 +40,7 @@ rb_transactions <- function(bank_ids = NULL,
                             cache_dir = NULL) {
 
   if (is.null(cache_dir)) {
-    cache_dir <- file.path(tempdir(), "ribits_cache")
-    dir.create(cache_dir, showWarnings = FALSE, recursive = TRUE)
+    cache_dir <- .get_cache_dir(TRUE)
   }
 
   # If not including detailed, return NULL immediately
@@ -65,8 +64,7 @@ rb_transactions <- function(bank_ids = NULL,
   if (is.null(bank_ids)) {
     cli::cli_progress_step("Getting bank list...")
     banks <- rb_get("banks", state = state, district = district)
-    id_col <- .get_column_case_insensitive(banks, "bank_id")
-    bank_ids <- if (!is.na(id_col)) banks[[id_col]] else integer()
+    bank_ids <- .col_get(banks, "bank_id", default = integer())
     cli::cli_alert_info("Found {length(bank_ids)} banks")
   }
 
@@ -88,18 +86,9 @@ rb_transactions <- function(bank_ids = NULL,
     # Normalize column names
     names(data) <- janitor::make_clean_names(names(data))
 
-    # Filter by bank_ids
-    # This CSV has native bank_id - no name matching needed!
-    if ("bank_id" %in% names(data)) {
-      data <- data |> dplyr::filter(bank_id %in% bank_ids)
-    } else {
-      cli::cli_alert_warning("No bank_id in transactions_watershed - attempting name match")
-      if ("name" %in% names(data)) {
-        lookup <- rb_build_name_lookup(include_csv = FALSE, cache = TRUE)
-        data <- rb_match_names(data, lookup, name_col = "name", fuzzy = TRUE)
-        data <- data |> dplyr::filter(bank_id %in% bank_ids)
-      }
-    }
+    # Ensure bank_id exists and filter
+    data <- .ensure_bank_id(data, quietly = TRUE)
+    data <- data |> dplyr::filter(bank_id %in% bank_ids)
 
     data$source <- "csv_watershed"
     data
@@ -146,14 +135,9 @@ rb_transactions <- function(bank_ids = NULL,
     # Normalize column names
     names(data) <- janitor::make_clean_names(names(data))
 
-    # Filter by bank_ids
-    if ("bank_id" %in% names(data)) {
-      data <- data |> dplyr::filter(bank_id %in% bank_ids)
-    } else if ("name" %in% names(data)) {
-      lookup <- rb_build_name_lookup(include_csv = FALSE, cache = TRUE)
-      data <- rb_match_names(data, lookup, name_col = "name", fuzzy = TRUE)
-      data <- data |> dplyr::filter(bank_id %in% bank_ids)
-    }
+    # Ensure bank_id exists and filter
+    data <- .ensure_bank_id(data, quietly = TRUE)
+    data <- data |> dplyr::filter(bank_id %in% bank_ids)
 
     data$source <- "csv_ledger"
     data

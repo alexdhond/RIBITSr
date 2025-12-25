@@ -42,6 +42,13 @@
 #' @param cache Cache downloaded CSV files to temp directory? Default TRUE.
 #'   Significantly speeds up repeated queries. Cache is cleared when R session ends.
 #'
+#' @param include_summaries Include comprehensive summaries in banks dataframe? Default TRUE.
+#'   When TRUE, adds summary metrics from:
+#'   - Transactions (volume, temporal patterns, geography, permittees)
+#'   - Anticipated credit releases (upcoming releases in next 5 years)
+#'   - Public notices (document counts and recency)
+#'   Set to FALSE for minimal banks dataframe with just core attributes.
+#'
 #' @param quietly Suppress progress messages? Default FALSE.
 #'
 #' @return A `ribits_data` object containing:
@@ -87,6 +94,7 @@ ribits <- function(type = "banks",
                    spatial = TRUE,
                    sources = c("api", "epa", "csv"),
                    cache = TRUE,
+                   include_summaries = TRUE,
                    quietly = FALSE) {
 
   type <- match.arg(type, c("banks", "ilf", "umbrellas"))
@@ -117,7 +125,8 @@ ribits <- function(type = "banks",
     sources = sources,
     cache = cache,
     quietly = quietly,
-    include_detailed_transactions = include_comprehensive
+    include_detailed_transactions = include_comprehensive,
+    include_summaries = include_summaries
   )
 }
 

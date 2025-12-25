@@ -29,6 +29,7 @@ Imports:
     janitor,
     jsonlite,
     purrr,
+    rappdirs,
     readr,
     rlang,
     sf,
@@ -41,3 +42,4 @@ Imports:
     utils
 URL: https://github.com/alexdhond/RIBITSr
 BugReports: https://github.com/alexdhond/RIBITSr/issues
+LazyData: true

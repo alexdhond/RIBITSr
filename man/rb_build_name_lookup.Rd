@@ -4,32 +4,64 @@
 \alias{rb_build_name_lookup}
 \title{Build a name-to-ID lookup table}
 \usage{
-rb_build_name_lookup(include_csv = TRUE, cache = TRUE)
+rb_build_name_lookup(
+  include_csv = TRUE,
+  max_age_days = 30,
+  force_refresh = FALSE
+)
 }
 \arguments{
-\item{include_csv}{Logical. Also include mappings from transactions_watershed CSV.
-Default TRUE.}
+\item{include_csv}{Logical. Also include mappings from transactions_watershed CSV
+when fetching fresh data. Default TRUE.}
 
-\item{cache}{Logical. Cache the lookup table for faster subsequent calls.
-Default TRUE.}
+\item{max_age_days}{Integer. Maximum age in days for cached data before
+auto-refresh. Default 30. Set to 0 to always fetch fresh data.}
+
+\item{force_refresh}{Logical. Force refresh from APIs even if cache is fresh.
+Default FALSE.}
 }
 \value{
 A tibble with columns: name, bank_id, state, district, year_established,
-and source (where the mapping came from)
+source (data source), and name_normalized (for fuzzy matching)
 }
 \description{
 Creates a lookup table mapping bank/program names to their IDs using
-data from EPA ArcGIS and the RIBITS API. Useful for joining CSV data
-that lacks numeric IDs.
+data from EPA ArcGIS and the RIBITS API. This function implements a
+smart caching strategy to minimize API calls:
+}
+\details{
+\enumerate{
+\item Checks persistent user cache first (default: 30 day refresh)
+\item If cache is stale/missing, fetches fresh data from APIs
+\item Falls back to bundled package data if APIs are unavailable
+}
+
+The persistent cache is stored in the user's cache directory
+(see \code{\link[rappdirs:user_cache_dir]{rappdirs::user_cache_dir()}}). This means:
+\itemize{
+\item Cache persists across R sessions
+\item First run fetches from API (~10-30 seconds)
+\item Subsequent runs are near-instant (reads from disk)
+\item Auto-refreshes every 30 days to capture new banks
+\item Works offline using bundled fallback data
+}
 }
 \examples{
 \dontrun{
-# Build lookup table
+# Build lookup table (uses cache if available)
 lookup <- rb_build_name_lookup()
 
-# Use it to add bank_id to CSV data
-csv_data <- rb_read("my_report.csv")
-csv_with_id <- rb_match_names(csv_data, lookup, name_col = "Bank Name")
+# Force refresh from APIs
+lookup <- rb_build_name_lookup(force_refresh = TRUE)
+
+# Use shorter cache lifetime (7 days)
+lookup <- rb_build_name_lookup(max_age_days = 7)
+
+# Check when bundled data was generated
+data(banks_lookup)
+attr(banks_lookup, "generated_date")
 }
 }
-\keyword{internal}
+\seealso{
+\code{\link[=rb_match_names]{rb_match_names()}} to use the lookup table for name matching
+}

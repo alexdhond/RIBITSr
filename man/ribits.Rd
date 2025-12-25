@@ -13,6 +13,7 @@ ribits(
   spatial = TRUE,
   sources = c("api", "epa", "csv"),
   cache = TRUE,
+  include_summaries = TRUE,
   quietly = FALSE
 )
 }
@@ -56,6 +57,15 @@ the package automatically falls back to other sources.}
 
 \item{cache}{Cache downloaded CSV files to temp directory? Default TRUE.
 Significantly speeds up repeated queries. Cache is cleared when R session ends.}
+
+\item{include_summaries}{Include comprehensive summaries in banks dataframe? Default TRUE.
+When TRUE, adds summary metrics from:
+\itemize{
+\item Transactions (volume, temporal patterns, geography, permittees)
+\item Anticipated credit releases (upcoming releases in next 5 years)
+\item Public notices (document counts and recency)
+Set to FALSE for minimal banks dataframe with just core attributes.
+}}
 
 \item{quietly}{Suppress progress messages? Default FALSE.}
 }
