@@ -316,7 +316,7 @@ rb_transactions <- function(bank_ids = NULL,
       missing_names <- is.na(unified$bank_name)
       if (any(missing_names)) {
         tryCatch({
-          lookup <- rb_build_name_lookup(include_csv = FALSE, cache = TRUE)
+          lookup <- rb_build_name_lookup(include_csv = FALSE)
           if (!is.null(lookup) && nrow(lookup) > 0) {
             id_to_name <- lookup |>
               dplyr::select(bank_id, name) |>

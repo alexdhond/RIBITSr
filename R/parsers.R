@@ -88,6 +88,8 @@
 #' @param path Path to the CSV file.
 #' @param type Optional. Report type for special parsing. Usually auto-detected.
 #'   Special types: "potential_credits" (requires hierarchical parsing).
+#' @param validate Logical. If TRUE (default), performs validation checks on content
+#'   (e.g., checking for HTML errors or empty files).
 #' @return A tibble.
 #' @export
 #' @examples

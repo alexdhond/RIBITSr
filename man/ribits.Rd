@@ -14,7 +14,8 @@ ribits(
   sources = c("api", "epa", "csv"),
   cache = TRUE,
   include_summaries = TRUE,
-  quietly = FALSE
+  quietly = FALSE,
+  id = NULL
 )
 }
 \arguments{
@@ -25,11 +26,12 @@ ribits(
 \item "umbrellas": Umbrella mitigation instruments
 }}
 
-\item{state}{State filter (e.g., "CA", "OR", "TX")}
+\item{state}{State filter (e.g., "CA", "OR", "TX"). Full names (e.g. "California") are also accepted.}
 
 \item{district}{USACE district filter (e.g., "Portland", "Sacramento")}
 
-\item{ids}{Optional vector of specific IDs to retrieve (bank_ids, program_ids, etc.)}
+\item{ids}{Optional vector of specific IDs to retrieve (bank_ids, program_ids, etc.).
+Alias: \code{id} can also be used.}
 
 \item{transactions}{Level of transaction data to include (banks only):
 \itemize{
@@ -68,6 +70,8 @@ Set to FALSE for minimal banks dataframe with just core attributes.
 }}
 
 \item{quietly}{Suppress progress messages? Default FALSE.}
+
+\item{id}{Alternative for \code{ids} for compatibility.}
 }
 \value{
 A \code{ribits_data} object containing:

@@ -10,3 +10,6 @@
 ^data/ribits_manual$
 ^data/ribits_reports$
 ^data/ribits_cache$
+^IMPLEMENTATION_SUMMARY\.md$
+^TEST_RESULTS\.md$
+^data-raw$

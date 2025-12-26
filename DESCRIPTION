@@ -13,6 +13,7 @@ RoxygenNote: 7.3.3
 Suggests:
     devtools,
     ggplot2,
+    here,
     httptest2,
     knitr,
     lubridate,

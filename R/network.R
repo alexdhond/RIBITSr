@@ -56,66 +56,11 @@
 }
 
 
-#' Configure network settings (Deprecated)
-#'
-#' @description
-#' `r lifecycle::badge("deprecated")`
-#'
-#' This function is deprecated. Please use [rb_config()] instead for a unified
-#' configuration interface that includes network settings, caching, rate limiting,
-#' and data quality options.
-#'
-#' Set package-wide options for network behavior including retries,
-#' timeouts, and checkpointing.
-#'
-#' @param max_retries Maximum number of retry attempts. Default 3.
-#' @param retry_delay Initial delay between retries in seconds. Default 2.
-#' @param backoff_multiplier Multiplier for exponential backoff. Default 2.
-#' @param timeout Request timeout in seconds. Default 30.
-#' @param checkpoint_dir Directory for saving checkpoints. If NULL, checkpoints
-#'   are saved to a temp directory. Set to FALSE to disable checkpointing.
-#' @param verbose Show detailed progress messages. Default TRUE.
-#'
-#' @return Invisibly returns current settings
+#' Network failure log
 #' @keywords internal
-#' @examples
-#' \dontrun{
-#' # DEPRECATED: Use rb_config() instead
-#' rb_config(max_retries = 5, timeout = 60)
-#'
-#' # Old way (still works but deprecated)
-#' rb_network_config(max_retries = 5, timeout = 60)
-#' }
-rb_network_config <- function(max_retries = NULL,
-                               retry_delay = NULL,
-                               backoff_multiplier = NULL,
-                               timeout = NULL,
-                               checkpoint_dir = NULL,
-                               verbose = NULL) {
-
-  # Deprecation warning
-  lifecycle::deprecate_warn(
-    when = "0.3.0",
-    what = "rb_network_config()",
-    with = "rb_config()"
-  )
-
-  if (!is.null(max_retries)) .network_options$max_retries <- max_retries
-  if (!is.null(retry_delay)) .network_options$retry_delay <- retry_delay
-  if (!is.null(backoff_multiplier)) .network_options$backoff_multiplier <- backoff_multiplier
-  if (!is.null(timeout)) .network_options$timeout <- timeout
-  if (!is.null(checkpoint_dir)) .network_options$checkpoint_dir <- checkpoint_dir
-  if (!is.null(verbose)) .network_options$verbose <- verbose
-
-  invisible(list(
-    max_retries = .network_options$max_retries,
-    retry_delay = .network_options$retry_delay,
-    backoff_multiplier = .network_options$backoff_multiplier,
-    timeout = .network_options$timeout,
-    checkpoint_dir = .network_options$checkpoint_dir,
-    verbose = .network_options$verbose
-  ))
-}
+#' @noRd
+.network_failures <- new.env(parent = emptyenv())
+.network_failures$log <- NULL
 
 
 #' Classify error as retryable or permanent

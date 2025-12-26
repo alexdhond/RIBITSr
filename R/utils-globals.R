@@ -3,8 +3,9 @@
 # These variables are used in dplyr/tidyverse NSE contexts
 
 #' @importFrom rlang .data
-#' @importFrom utils head
-#' @importFrom stats na.omit
+#' @importFrom utils head data
+#' @importFrom stats na.omit median aggregate
+#' @importFrom graphics barplot legend
 #' @importFrom tidyselect where
 NULL
 
@@ -30,7 +31,37 @@ utils::globalVariables(c(
   "severity",
   "resolved_value",
   "field",
-  "count"
+  "count",
+  "state_list",
+  "bank_name",
+  "bank_name_lookup",
+  "bank_name_global",
+  "banks_lookup",
+  "sponsor_name",
+  "contact_type",
+  "first_name",
+  "last_name",
+  "email",
+  "phone",
+  "credits",
+  "anticipated_release_date",
+  "available_credits",
+  "released_credits",
+  "potential_credits",
+  "credit_classification",
+  "create_date",
+  "acres",
+  "transaction_type",
+  "credit_action",
+  "transaction_date",
+  "impact_huc",
+  "impact_state",
+  "permittee",
+  "geometry",
+  "footprints_data",
+  "service_areas_data",
+  "across",
+  "everything"
 ))
 
 # ---- Utility Functions ----
@@ -120,7 +151,7 @@ utils::globalVariables(c(
       cli::cli_alert_info("No bank_id column found, matching by name...")
     }
 
-    lookup <- rb_build_name_lookup(include_csv = FALSE, cache = TRUE)
+    lookup <- rb_build_name_lookup(include_csv = FALSE)
     data <- rb_match_names(data, lookup, name_col = "name", fuzzy = TRUE)
 
     # Now filter by the matched bank_id
@@ -369,4 +400,33 @@ rb_clear_cache <- function(type = c("all", "csv", "lookup"), verbose = TRUE) {
   }
 
   invisible(files_deleted)
+}
+
+#' Standardize state codes (Internal)
+#'
+#' Converts full state names (e.g., "California") to 2-letter abbreviations ("CA").
+#' Handles case insensitivity. Returns original if it looks like an abbreviation.
+#'
+#' @param state Character. State name or abbreviation.
+#' @return Character. 2-letter uppercase abbreviation or original string if not found.
+#' @keywords internal
+.standardize_state <- function(state) {
+  if (is.null(state)) return(NULL)
+  
+  # Ensure character
+  state <- as.character(state)
+  
+  # Vectorized lookup
+  sapply(state, function(s) {
+    if (nchar(s) == 2) return(toupper(s)) # Already abbreviation
+    
+    # Try exact match on name
+    match_idx <- match(tolower(s), tolower(datasets::state.name))
+    if (!is.na(match_idx)) {
+      return(datasets::state.abb[match_idx])
+    }
+    
+    # Return original if no match (could be a valid code not in state.name)
+    s
+  })
 }

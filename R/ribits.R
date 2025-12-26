@@ -16,9 +16,10 @@
 #'   - "banks" (default): Mitigation banks
 #'   - "ilf": In-Lieu Fee programs
 #'   - "umbrellas": Umbrella mitigation instruments
-#' @param state State filter (e.g., "CA", "OR", "TX")
+#' @param state State filter (e.g., "CA", "OR", "TX"). Full names (e.g. "California") are also accepted.
 #' @param district USACE district filter (e.g., "Portland", "Sacramento")
-#' @param ids Optional vector of specific IDs to retrieve (bank_ids, program_ids, etc.)
+#' @param ids Optional vector of specific IDs to retrieve (bank_ids, program_ids, etc.). 
+#'   Alias: `id` can also be used.
 #' @param transactions Level of transaction data to include (banks only):
 #'   - "none": No transaction data (fastest)
 #'   - "basic" (default): API ledger only (~20 columns, fast, real-time data)
@@ -50,6 +51,7 @@
 #'   Set to FALSE for minimal banks dataframe with just core attributes.
 #'
 #' @param quietly Suppress progress messages? Default FALSE.
+#' @param id Alternative for `ids` for compatibility.
 #'
 #' @return A `ribits_data` object containing:
 #'   \item{banks/programs/umbrellas}{Summary data (tibble)}
@@ -95,10 +97,19 @@ ribits <- function(type = "banks",
                    sources = c("api", "epa", "csv"),
                    cache = TRUE,
                    include_summaries = TRUE,
-                   quietly = FALSE) {
+                   quietly = FALSE,
+                   id = NULL) {
 
   type <- match.arg(type, c("banks", "ilf", "umbrellas"))
   transactions <- match.arg(transactions)
+  
+  # Standardize state
+  state <- .standardize_state(state)
+  
+  # Handle id/ids alias
+  if (is.null(ids) && !is.null(id)) {
+    ids <- id
+  }
 
   # Determine what data to fetch
   # Transactions only apply to banks
@@ -935,4 +946,105 @@ select.ribits_data <- function(.data, ...) {
 mutate.ribits_data <- function(.data, ...) {
   .data$banks <- dplyr::mutate(.data$banks, ...)
   .data
+}
+
+#' Convert ribits_data to a tibble
+#'
+#' @description
+#' Returns the main `banks` (or `ilf`/`umbrellas`) dataframe.
+#' This allows `ribits_data` objects to be used directly in tidyverse pipelines
+#' that expect a dataframe.
+#'
+#' @param x A ribits_data object
+#' @param ... Additional arguments ignored
+#'
+#' @return A tibble
+#' @export
+#' @examples
+#' \dontrun{
+#' ribits(state = "CA") |> as_tibble()
+#' }
+as_tibble.ribits_data <- function(x, ...) {
+  if (!is.null(x$banks)) {
+    return(tibble::as_tibble(x$banks))
+  }
+  tibble::tibble()
+}
+
+#' Plot ribits_data objects
+#'
+#' @description
+#' Provides a quick visual overview of the data.
+#' - If spatial data is available, it maps the geometries.
+#' - If no spatial data but transactions exist, it plots a credit summary.
+#'
+#' @param x A ribits_data object
+#' @param ... Additional arguments passed to the underlying plot function
+#'
+#' @return NULL (called for side effects)
+#' @export
+#' @examples
+#' \dontrun{
+#' ca <- ribits(state = "CA")
+#' plot(ca)
+#' }
+plot.ribits_data <- function(x, ...) {
+  
+  # 1. Try to plot geometry
+  if (!is.null(x$geometry) && inherits(x$geometry, "sf") && nrow(x$geometry) > 0) {
+    # Check if we have footprints or service areas to plot
+    # Prefer footprints, then service areas, then centroids
+    
+    has_fp <- "footprint" %in% names(x$geometry) && !all(sf::st_is_empty(x$geometry$footprint))
+    has_sa <- "service_area" %in% names(x$geometry) && !all(sf::st_is_empty(x$geometry$service_area))
+    
+    if (has_sa) {
+      cli::cli_alert_info("Plotting service areas...")
+      plot(sf::st_geometry(x$geometry$service_area), col = NA, border = "blue", main = "Bank Service Areas", ...)
+      if (has_fp) {
+        plot(sf::st_geometry(x$geometry$footprint), col = "red", add = TRUE, ...)
+      } else {
+        plot(sf::st_geometry(x$geometry), pch = 20, col = "red", add = TRUE, ...)
+      }
+      legend("bottomright", legend = c("Service Area", "Location"), 
+             fill = c(NA, "red"), border = c("blue", NA), pch = c(NA, 20))
+      return(invisible(NULL))
+    }
+    
+    if (has_fp) {
+      cli::cli_alert_info("Plotting footprints...")
+      plot(sf::st_geometry(x$geometry$footprint), col = "blue", border = "black", main = "Bank Footprints", ...)
+      return(invisible(NULL))
+    }
+    
+    # Fallback to centroids
+    cli::cli_alert_info("Plotting centroids...")
+    plot(sf::st_geometry(x$geometry), pch = 20, col = "blue", main = "Bank Locations", ...)
+    return(invisible(NULL))
+  }
+  
+  # 2. Try to plot transaction summary
+  if (!is.null(x$transactions) && nrow(x$transactions) > 0) {
+    if ("transaction_date" %in% names(x$transactions) && "credits" %in% names(x$transactions)) {
+      cli::cli_alert_info("Plotting transaction history...")
+      
+      # Aggregate by year
+      df <- x$transactions
+      df$year <- as.integer(format(as.Date(df$transaction_date), "%Y"))
+      
+      # Base R aggregation to avoid heavy deps in plot method
+      agg <- stats::aggregate(credits ~ year, data = df, sum, na.rm = TRUE)
+      
+      if (nrow(agg) > 0) {
+        barplot(agg$credits, names.arg = agg$year, 
+                main = "Total Credits Transacted by Year",
+                xlab = "Year", ylab = "Credits", col = "steelblue", ...)
+        return(invisible(NULL))
+      }
+    }
+  }
+  
+  # 3. Nothing to plot
+  cli::cli_alert_warning("No spatial data or transaction history to plot.")
+  invisible(NULL)
 }

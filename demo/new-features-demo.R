@@ -150,7 +150,7 @@ writeLines(c(
 
 cat("  Valid CSV (>100 bytes, 2+ lines): ")
 result <- .validate_csv_content(valid_csv)
-cat(ifelse(result, "PASS ✓\n", "FAIL ✗\n"))
+cat(ifelse(result, "PASS [OK]\n", "FAIL [X]\n"))
 
 # Small file
 small_csv <- tempfile(fileext = ".csv")
@@ -158,7 +158,7 @@ writeLines("a,b", small_csv)
 
 cat("  Small CSV (<100 bytes): ")
 result <- .validate_csv_content(small_csv)
-cat(ifelse(!result, "DETECTED ✓\n", "MISSED ✗\n"))
+cat(ifelse(!result, "DETECTED [OK]\n", "MISSED [X]\n"))
 
 # HTML error page
 html_csv <- tempfile(fileext = ".csv")
@@ -170,9 +170,9 @@ writeLines(c(
 cat("  HTML error page: ")
 tryCatch({
   .validate_csv_content(html_csv)
-  cat("MISSED ✗\n")
+  cat("MISSED [X]\n")
 }, error = function(e) {
-  cat("DETECTED ✓\n")
+  cat("DETECTED [OK]\n")
 })
 
 # Clean up
@@ -193,13 +193,13 @@ validation <- .validate_transaction_data(test_txns)
 
 cat(sprintf("    Warnings: %d\n", length(validation$warnings)))
 cat(sprintf("    Missing bank_id: %s\n",
-            ifelse(any(grepl("bank_id", validation$warnings)), "DETECTED ✓", "MISSED ✗")))
+            ifelse(any(grepl("bank_id", validation$warnings)), "DETECTED [OK]", "MISSED [X]")))
 cat(sprintf("    Negative credits: %s\n",
-            ifelse(any(grepl("negative", validation$warnings)), "DETECTED ✓", "MISSED ✗")))
+            ifelse(any(grepl("negative", validation$warnings)), "DETECTED [OK]", "MISSED [X]")))
 cat(sprintf("    Large credits: %s\n",
-            ifelse(any(grepl("10,000", validation$warnings)), "DETECTED ✓", "MISSED ✗")))
+            ifelse(any(grepl("10,000", validation$warnings)), "DETECTED [OK]", "MISSED [X]")))
 cat(sprintf("    Source breakdown: %s\n",
-            ifelse("source_breakdown" %in% names(validation$stats), "PROVIDED ✓", "MISSING ✗")))
+            ifelse("source_breakdown" %in% names(validation$stats), "PROVIDED [OK]", "MISSING [X]")))
 
 
 # =============================================================================
@@ -209,20 +209,20 @@ cat(sprintf("    Source breakdown: %s\n",
 cat("\n\n=== PHASE 6: Enhanced Error Messages ===\n\n")
 
 cat("Error messages now include:\n")
-cat("  ✓ HTTP status code\n")
-cat("  ✓ Retryable vs permanent classification\n")
-cat("  ✓ Specific guidance for each error type\n")
-cat("  ✓ Remediation steps\n\n")
+cat("  - HTTP status code\n")
+cat("  - Retryable vs permanent classification\n")
+cat("  - Specific guidance for each error type\n")
+cat("  - Remediation steps\n\n")
 
 cat("Example error classifications:\n")
-cat("  404 Not Found       → Permanent (won't retry)\n")
-cat("  401 Unauthorized    → Permanent (won't retry)\n")
-cat("  403 Forbidden       → Permanent (won't retry)\n")
-cat("  408 Timeout         → Retryable\n")
-cat("  429 Rate Limited    → Retryable\n")
-cat("  500 Server Error    → Retryable\n")
-cat("  503 Unavailable     → Retryable\n")
-cat("  Network timeout     → Retryable\n")
+cat("  404 Not Found       -> Permanent (won't retry)\n")
+cat("  401 Unauthorized    -> Permanent (won't retry)\n")
+cat("  403 Forbidden       -> Permanent (won't retry)\n")
+cat("  408 Timeout         -> Retryable\n")
+cat("  429 Rate Limited    -> Retryable\n")
+cat("  500 Server Error    -> Retryable\n")
+cat("  503 Unavailable     -> Retryable\n")
+cat("  Network timeout     -> Retryable\n")
 
 
 # =============================================================================
@@ -233,12 +233,12 @@ cat("\n\n=== SUMMARY ===\n\n")
 
 cat("All new features demonstrated:\n\n")
 
-cat("✓ Phase 1: Configuration system with rb_config()\n")
-cat("✓ Phase 2: Intelligent error classification\n")
-cat("✓ Phase 3: Progress bars and vectorized name matching\n")
-cat("✓ Phase 4: Global rate limiting and persistent caching\n")
-cat("✓ Phase 5: CSV and transaction data validation\n")
-cat("✓ Phase 6: Enhanced error messages\n\n")
+cat("[OK] Phase 1: Configuration system with rb_config()\n")
+cat("[OK] Phase 2: Intelligent error classification\n")
+cat("[OK] Phase 3: Progress bars and vectorized name matching\n")
+cat("[OK] Phase 4: Global rate limiting and persistent caching\n")
+cat("[OK] Phase 5: CSV and transaction data validation\n")
+cat("[OK] Phase 6: Enhanced error messages\n\n")
 
 cat("Environment variable support:\n")
 cat("  RIBITS_MAX_RETRIES\n")
@@ -257,7 +257,7 @@ cat("  Rate limiting: Consistent across all API calls\n")
 cat("  Retry logic: Automatic with exponential backoff\n")
 cat("  Validation: Catches corrupted downloads early\n\n")
 
-cat("✓ All features tested and validated!\n")
-cat("✓ 184/184 tests passing (100%)\n")
-cat("✓ No breaking changes\n")
-cat("✓ Ready for production\n\n")
+cat("[OK] All features tested and validated!\n")
+cat("[OK] 184/184 tests passing (100%)\n")
+cat("[OK] No breaking changes\n")
+cat("[OK] Ready for production\n\n")
