@@ -10,11 +10,60 @@
 .network_options$checkpoint_dir <- NULL
 .network_options$verbose <- TRUE
 
+# New options for enhanced functionality
+.network_options$rate_limit <- 5  # requests per second (NULL = unlimited)
+.network_options$use_persistent_cache <- FALSE  # Use persistent cache across sessions
+.network_options$cache_max_age_days <- 30  # Days before cached data expires
+.network_options$custom_cache_dir <- NULL  # Custom cache directory (NULL = default)
 
-#' Configure network settings (Internal)
+# Rate limiting state
+.rate_limiter <- new.env(parent = emptyenv())
+.rate_limiter$last_request_time <- NULL
+
+
+#' Apply rate limiting before request
+#'
+#' Enforces a minimum delay between requests based on the configured rate limit.
+#' If rate limiting is disabled (rate_limit = NULL), returns immediately.
+#'
+#' @keywords internal
+#' @noRd
+.apply_rate_limit <- function() {
+  rate_limit <- .network_options$rate_limit
+
+  # If rate limiting disabled, return immediately
+  if (is.null(rate_limit) || rate_limit <= 0) {
+    return(invisible())
+  }
+
+  # Calculate minimum time between requests
+  min_interval <- 1 / rate_limit
+
+  # Check if we need to wait
+  if (!is.null(.rate_limiter$last_request_time)) {
+    elapsed <- as.numeric(Sys.time() - .rate_limiter$last_request_time)
+
+    if (elapsed < min_interval) {
+      wait_time <- min_interval - elapsed
+      Sys.sleep(wait_time)
+    }
+  }
+
+  # Update last request time
+  .rate_limiter$last_request_time <- Sys.time()
+
+  invisible()
+}
+
+
+#' Configure network settings (Deprecated)
 #'
 #' @description
-#' This function is internal. Network settings have sensible defaults.
+#' `r lifecycle::badge("deprecated")`
+#'
+#' This function is deprecated. Please use [rb_config()] instead for a unified
+#' configuration interface that includes network settings, caching, rate limiting,
+#' and data quality options.
 #'
 #' Set package-wide options for network behavior including retries,
 #' timeouts, and checkpointing.
@@ -31,14 +80,11 @@
 #' @keywords internal
 #' @examples
 #' \dontrun{
-#' # Increase retries for unreliable connection
+#' # DEPRECATED: Use rb_config() instead
+#' rb_config(max_retries = 5, timeout = 60)
+#'
+#' # Old way (still works but deprecated)
 #' rb_network_config(max_retries = 5, timeout = 60)
-#'
-#' # Enable checkpointing to specific directory
-#' rb_network_config(checkpoint_dir = "data/checkpoints")
-#'
-#' # Disable checkpointing
-#' rb_network_config(checkpoint_dir = FALSE)
 #' }
 rb_network_config <- function(max_retries = NULL,
                                retry_delay = NULL,
@@ -46,6 +92,13 @@ rb_network_config <- function(max_retries = NULL,
                                timeout = NULL,
                                checkpoint_dir = NULL,
                                verbose = NULL) {
+
+  # Deprecation warning
+  lifecycle::deprecate_warn(
+    when = "0.3.0",
+    what = "rb_network_config()",
+    with = "rb_config()"
+  )
 
   if (!is.null(max_retries)) .network_options$max_retries <- max_retries
   if (!is.null(retry_delay)) .network_options$retry_delay <- retry_delay
@@ -65,10 +118,70 @@ rb_network_config <- function(max_retries = NULL,
 }
 
 
+#' Classify error as retryable or permanent
+#'
+#' Determines whether an error should be retried based on error message
+#' and HTTP status code.
+#'
+#' @param error_msg Error message string
+#' @param status_code HTTP status code (if available)
+#'
+#' @return TRUE if error is retryable, FALSE if permanent
+#' @keywords internal
+#' @noRd
+#'
+#' @details
+#' Retryable errors:
+#' - Network errors (timeout, connection failed, DNS resolution)
+#' - HTTP 429 (Rate Limit)
+#' - HTTP 5xx (Server errors)
+#' - HTTP 408 (Request Timeout)
+#'
+#' Permanent errors (don't retry):
+#' - HTTP 400 (Bad Request)
+#' - HTTP 401 (Unauthorized)
+#' - HTTP 403 (Forbidden)
+#' - HTTP 404 (Not Found)
+#' - Other 4xx errors
+.is_retryable_error <- function(error_msg, status_code = NULL) {
+
+  # Network errors are always retryable
+  network_patterns <- c(
+    "timed out", "timeout", "connection", "resolve host",
+    "network", "DNS", "could not connect"
+  )
+
+  if (any(sapply(network_patterns, function(pattern) {
+    grepl(pattern, error_msg, ignore.case = TRUE)
+  }))) {
+    return(TRUE)
+  }
+
+  # HTTP status code classification
+  if (!is.null(status_code)) {
+    # Rate limiting - retryable
+    if (status_code == 429) return(TRUE)
+
+    # Request timeout - retryable
+    if (status_code == 408) return(TRUE)
+
+    # Server errors (5xx) - retryable
+    if (status_code >= 500 && status_code < 600) return(TRUE)
+
+    # Client errors (4xx) - permanent, don't retry
+    if (status_code >= 400 && status_code < 500) return(FALSE)
+  }
+
+  # Conservative default: retry unless we know it's permanent
+  TRUE
+}
+
+
 #' Perform HTTP request with automatic retry
 #'
 #' Wraps httr2 requests with automatic retry logic, exponential backoff,
-#' and detailed progress messaging.
+#' and detailed progress messaging. Skips retries for permanent errors
+#' (e.g., 404, 401).
 #'
 #' @param req An httr2 request object
 #' @param description Description for progress messages
@@ -93,6 +206,8 @@ rb_request_with_retry <- function(req,
   req <- req |> httr2::req_timeout(timeout)
 
   last_error <- NULL
+  last_status_code <- NULL
+  is_permanent_error <- FALSE
 
   for (attempt in seq_len(max_retries)) {
     if (attempt > 1 && verbose) {
@@ -103,14 +218,27 @@ rb_request_with_retry <- function(req,
       retry_delay <- retry_delay * backoff
     }
 
+    # Apply rate limiting before making request
+    .apply_rate_limit()
+
     result <- tryCatch({
       resp <- httr2::req_perform(req)
 
       if (httr2::resp_status(resp) >= 400) {
-        last_error <- paste("HTTP", httr2::resp_status(resp))
-        if (verbose) {
-          cli::cli_alert_warning("{description}: {last_error}")
+        last_status_code <<- httr2::resp_status(resp)
+        last_error <- paste("HTTP", last_status_code)
+
+        # Check if this is a retryable error
+        if (!.is_retryable_error(last_error, last_status_code)) {
+          is_permanent_error <<- TRUE
+          if (verbose) {
+            cli::cli_alert_danger("{description}: {last_error} (permanent error, not retrying)")
+          }
+        } else if (verbose) {
+          retry_msg <- if (attempt < max_retries) " (will retry)" else ""
+          cli::cli_alert_warning("{description}: {last_error}{retry_msg}")
         }
+
         NULL
       } else {
         resp
@@ -118,20 +246,39 @@ rb_request_with_retry <- function(req,
     },
     httr2_failure = function(e) {
       last_error <<- conditionMessage(e)
-      if (verbose) {
+
+      # Try to extract status code from error message
+      if (grepl("HTTP (\\d{3})", last_error)) {
+        last_status_code <<- as.integer(sub(".*HTTP (\\d{3}).*", "\\1", last_error))
+      }
+
+      # Check if retryable
+      if (!.is_retryable_error(last_error, last_status_code)) {
+        is_permanent_error <<- TRUE
+        if (verbose) {
+          cli::cli_alert_danger("{description}: {last_error} (permanent error, not retrying)")
+        }
+      } else if (verbose) {
         if (grepl("timed out|timeout", last_error, ignore.case = TRUE)) {
-          cli::cli_alert_warning("{description}: Request timed out after {timeout}s")
+          retry_msg <- if (attempt < max_retries) " (will retry)" else ""
+          cli::cli_alert_warning("{description}: Request timed out after {timeout}s{retry_msg}")
         } else {
-          cli::cli_alert_warning("{description}: {last_error}")
+          retry_msg <- if (attempt < max_retries) " (will retry)" else ""
+          cli::cli_alert_warning("{description}: {last_error}{retry_msg}")
         }
       }
+
       NULL
     },
     error = function(e) {
       last_error <<- conditionMessage(e)
+
+      # Generic errors are usually retryable
       if (verbose) {
-        cli::cli_alert_warning("{description}: {last_error}")
+        retry_msg <- if (attempt < max_retries) " (will retry)" else ""
+        cli::cli_alert_warning("{description}: {last_error}{retry_msg}")
       }
+
       NULL
     })
 
@@ -141,13 +288,24 @@ rb_request_with_retry <- function(req,
       }
       return(result)
     }
+
+    # Break early if permanent error
+    if (is_permanent_error) {
+      break
+    }
   }
 
-  # All retries failed
+  # All retries failed or permanent error
   if (verbose) {
-    cli::cli_alert_danger(
-      "{description}: Failed after {max_retries} attempts. Last error: {last_error}"
-    )
+    if (is_permanent_error) {
+      cli::cli_alert_danger(
+        "{description}: Permanent error, cannot retry. Error: {last_error}"
+      )
+    } else {
+      cli::cli_alert_danger(
+        "{description}: Failed after {max_retries} attempts. Last error: {last_error}"
+      )
+    }
   }
 
   # Log the failure

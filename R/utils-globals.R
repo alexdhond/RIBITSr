@@ -143,16 +143,33 @@ utils::globalVariables(c(
 #' Returns the appropriate cache directory, creating it if needed.
 #' Consolidates the repeated pattern of cache directory setup.
 #'
-#' @param use_cache If TRUE, use persistent cache in tempdir. If FALSE, use tempdir directly.
+#' @param use_cache If TRUE, use cache. If FALSE, use tempdir directly.
+#' @param persistent If NULL, uses .network_options$use_persistent_cache.
+#'   If TRUE, uses persistent user cache directory. If FALSE, uses session-only tempdir.
 #'
 #' @return Path to cache directory
 #'
 #' @keywords internal
-.get_cache_dir <- function(use_cache = TRUE) {
-  cache_dir <- if (use_cache) {
-    file.path(tempdir(), "ribits_cache")
+.get_cache_dir <- function(use_cache = TRUE, persistent = NULL) {
+  # Determine if persistent cache should be used
+  if (is.null(persistent)) {
+    persistent <- .network_options$use_persistent_cache %||% FALSE
+  }
+
+  if (!use_cache) {
+    return(tempdir())
+  }
+
+  cache_dir <- if (persistent) {
+    # Use custom cache dir if specified, otherwise user cache dir
+    if (!is.null(.network_options$custom_cache_dir)) {
+      .network_options$custom_cache_dir
+    } else {
+      rappdirs::user_cache_dir("ribits", "RIBITSr")
+    }
   } else {
-    tempdir()
+    # Use session-only temp directory
+    file.path(tempdir(), "ribits_cache")
   }
 
   dir.create(cache_dir, showWarnings = FALSE, recursive = TRUE)
@@ -261,4 +278,95 @@ utils::globalVariables(c(
   }
 
   data
+}
+
+
+#' Clear persistent cache
+#'
+#' Removes all cached CSV reports and lookup data from the persistent
+#' user cache directory. Use this to force fresh downloads or free up disk space.
+#'
+#' @param type Type of cache to clear:
+#'   - "all" (default): Clear everything
+#'   - "csv": Clear only CSV reports
+#'   - "lookup": Clear only name lookup table
+#' @param verbose If TRUE (default), show messages about deleted files
+#'
+#' @return Invisibly returns number of files deleted
+#'
+#' @export
+#' @examples
+#' \dontrun{
+#' # Clear all persistent cache
+#' rb_clear_cache()
+#'
+#' # Clear only CSV reports
+#' rb_clear_cache("csv")
+#'
+#' # Clear only name lookup
+#' rb_clear_cache("lookup")
+#'
+#' # Clear silently
+#' rb_clear_cache(verbose = FALSE)
+#' }
+rb_clear_cache <- function(type = c("all", "csv", "lookup"), verbose = TRUE) {
+  type <- match.arg(type)
+
+  files_deleted <- 0
+
+  # Clear CSV reports from persistent cache
+  if (type %in% c("all", "csv")) {
+    csv_dir <- rappdirs::user_cache_dir("ribits", "RIBITSr")
+
+    if (dir.exists(csv_dir)) {
+      files <- list.files(csv_dir, pattern = "\\.csv$", full.names = TRUE)
+
+      if (length(files) > 0) {
+        unlink(files)
+        files_deleted <- files_deleted + length(files)
+
+        if (verbose) {
+          cli::cli_alert_success("Deleted {length(files)} cached CSV report(s)")
+        }
+      }
+    }
+  }
+
+  # Clear name lookup table
+  if (type %in% c("all", "lookup")) {
+    lookup_file <- file.path(rappdirs::user_cache_dir("ribits"), "banks_lookup.rds")
+
+    if (file.exists(lookup_file)) {
+      unlink(lookup_file)
+      files_deleted <- files_deleted + 1
+
+      if (verbose) {
+        cli::cli_alert_success("Deleted cached name lookup")
+      }
+    }
+  }
+
+  # Clear session cache as well if requested
+  if (type == "all") {
+    session_cache <- file.path(tempdir(), "ribits_cache")
+
+    if (dir.exists(session_cache)) {
+      files <- list.files(session_cache, full.names = TRUE, recursive = TRUE)
+
+      if (length(files) > 0) {
+        unlink(session_cache, recursive = TRUE)
+        files_deleted <- files_deleted + length(files)
+
+        if (verbose) {
+          cli::cli_alert_success("Deleted {length(files)} session cache file(s)")
+        }
+      }
+    }
+  }
+
+  if (files_deleted == 0 && verbose) {
+    cli::cli_alert_info("No cache files found to delete")
+  }
+
+  invisible(files_deleted)
 }

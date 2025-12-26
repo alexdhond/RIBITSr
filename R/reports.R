@@ -72,15 +72,63 @@ rb_download_report <- function(report_type,
   
   url <- paste0(base_url, ":", config$page, ":0:CSV:NO:", cc, "::")
   
-  cli::cli_alert_info("Downloading {.strong {config$name}}" )
-  
+  cli::cli_alert_info("Downloading {.strong {config$name}}")
+
   req <- httr2::request(url) |>
-    httr2::req_user_agent("RIBITSr R package") |>
-    httr2::req_timeout(300) # Reports can be large/slow
-  
+    httr2::req_user_agent("RIBITSr R package")
+
+  # Add progress tracking if verbose mode enabled
+  pb_id <- NULL
+  if (.network_options$verbose) {
+    pb_id <- cli::cli_progress_bar(
+      format = paste0(
+        "Downloading {config$name} ",
+        "{cli::pb_current} / {cli::pb_total} bytes ",
+        "{cli::pb_bar} {cli::pb_percent} ",
+        "[{cli::pb_rate}]"
+      ),
+      total = NA,
+      type = "download",
+      clear = FALSE
+    )
+
+    # Add httr2 progress callback
+    req <- req |> httr2::req_progress(function(down, up) {
+      if (down$total > 0) {
+        cli::cli_progress_update(
+          id = pb_id,
+          total = down$total,
+          set = down$current
+        )
+      }
+    })
+  }
+
+  # Use retry wrapper for robust downloads
+  # CSV reports can be large and prone to timeout
+  resp <- rb_request_with_retry(
+    req,
+    description = paste("CSV download:", config$name),
+    timeout = 300  # 5 minutes for large files
+  )
+
+  # Clean up progress bar
+  if (!is.null(pb_id)) {
+    cli::cli_progress_done(id = pb_id)
+  }
+
+  if (is.null(resp)) {
+    cli::cli_abort(c(
+      "Failed to download {config$name} after {.network_options$max_retries} attempts",
+      "i" = "Check rb_network_failures() for details",
+      "i" = "The RIBITS server may be temporarily unavailable"
+    ))
+  }
+
+  # Save response body to file
   tryCatch({
-    httr2::req_perform(req, path = path)
-    
+    writeBin(httr2::resp_body_raw(resp), path)
+
     # Check file size to ensure it's not empty/error
     info <- file.info(path)
     if (info$size < 100) {
@@ -91,11 +139,11 @@ rb_download_report <- function(report_type,
     } else {
       cli::cli_alert_success("Saved to {.path {path}} ({round(info$size / 1024, 1)} KB)")
     }
-    
+
     return(invisible(path))
-    
+
   }, error = function(e) {
-    cli::cli_abort("Download failed: {e$message}")
+    cli::cli_abort("Failed to save file: {e$message}")
   })
 }
 

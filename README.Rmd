@@ -229,6 +229,92 @@ banks2 <- ribits(state = "FL")
 banks3 <- ribits(state = "FL", cache = FALSE)
 ```
 
+## Configuration
+
+RIBITSr provides extensive configuration options to control network behavior, performance, and data quality. Use `rb_config()` to adjust settings:
+
+### Network & Reliability
+
+```{r config-network}
+# Configure retry behavior (useful for unreliable networks)
+rb_config(
+  max_retries = 5,          # Retry failed requests up to 5 times (default: 3)
+  retry_delay = 3,          # Wait 3 seconds between retries (default: 2)
+  timeout = 120             # Request timeout in seconds (default: 60)
+)
+
+# Configure rate limiting to be more conservative
+rb_config(
+  rate_limit = 2            # Limit to 2 requests/second (default: 5)
+)
+```
+
+### Persistent Caching
+
+By default, RIBITSr uses session-only caching (cache is cleared when R restarts). For persistent caching across sessions:
+
+```{r config-cache}
+# Enable persistent caching (survives R session restarts)
+rb_config(
+  use_persistent_cache = TRUE,    # Use persistent cache directory
+  cache_max_age_days = 7          # Clear cache after 7 days (default: 30)
+)
+
+# Clear persistent cache manually
+rb_clear_cache()              # Clear all cache
+rb_clear_cache("csv")         # Clear only CSV reports
+rb_clear_cache("lookup")      # Clear only name lookup table
+```
+
+### Data Quality Settings
+
+Control how RIBITSr handles discrepancies when harmonizing data from multiple sources:
+
+```{r config-quality}
+# Configure source priority for conflict resolution
+rb_config(
+  source_priority = c("api", "csv", "epa"),  # Prefer API over CSV over EPA
+  auto_resolve = TRUE                        # Automatically resolve conflicts
+)
+```
+
+### View Current Configuration
+
+```{r config-view}
+# See all current settings
+rb_config()
+#> RIBITSr Configuration:
+#>   Network & Reliability:
+#>     - max_retries: 3
+#>     - retry_delay: 2 seconds
+#>     - timeout: 60 seconds
+#>     - rate_limit: 5 requests/second
+#>   Caching:
+#>     - use_persistent_cache: FALSE
+#>     - cache_max_age_days: 30
+#>   Data Quality:
+#>     - source_priority: api, csv, epa
+#>     - auto_resolve: TRUE
+
+# Reset to defaults
+rb_config(reset = TRUE)
+```
+
+### Environment Variables
+
+You can also configure RIBITSr using environment variables (useful for reproducible workflows or shared code):
+
+```{r config-env}
+# Set in .Renviron file:
+RIBITS_MAX_RETRIES=5
+RIBITS_RATE_LIMIT=3
+RIBITS_TIMEOUT=120
+RIBITS_USE_PERSISTENT_CACHE=true
+RIBITS_CACHE_DIR=/path/to/cache
+```
+
+These will be loaded automatically when RIBITSr loads.
+
 ## Data Sources
 
 RIBITSr harmonizes data from three sources:

@@ -87,39 +87,122 @@ rb_extract_items <- function(data) {
 #' @keywords internal
 .rb_friendly_error <- function(e, context = "API request") {
   msg <- conditionMessage(e)
-  
-  # Network errors
-  if (grepl("Could not resolve host|connection refused|timed out", msg, ignore.case = TRUE)) {
+
+  # Extract HTTP status code if present
+  status_code <- NULL
+  if (grepl("HTTP (\\d{3})", msg)) {
+    status_code <- as.integer(sub(".*HTTP (\\d{3}).*", "\\1", msg))
+  }
+
+  # Determine if error is retryable using same logic as retry system
+  is_retryable <- .is_retryable_error(msg, status_code)
+
+  # Network errors (always retryable)
+  if (grepl("Could not resolve host|connection refused|timed out|timeout", msg, ignore.case = TRUE)) {
     cli::cli_abort(c(
       "Network error during {context}",
-      "i" = "Check your internet connection",
-      "i" = "The RIBITS server may be temporarily unavailable",
+      "x" = "Original error: {msg}",
+      "i" = "This is a temporary network issue",
+      "!" = "The request will be retried with exponential backoff",
+      "i" = "Check your internet connection if retries continue to fail",
+      "i" = "The RIBITS server may be temporarily unavailable"
+    ))
+  }
+
+  # HTTP 401 - Unauthorized (permanent error)
+  if (!is.null(status_code) && status_code == 401) {
+    cli::cli_abort(c(
+      "Authentication required (401)",
+      "x" = "The RIBITS API requires authentication for this resource",
+      "!" = "This is a permanent error - request will NOT be retried",
+      "i" = "Check if the endpoint requires credentials",
       "x" = "Original error: {msg}"
     ))
   }
-  
 
-  # HTTP errors
-  if (grepl("HTTP 404", msg)) {
+  # HTTP 403 - Forbidden (permanent error)
+  if (!is.null(status_code) && status_code == 403) {
+    cli::cli_abort(c(
+      "Access forbidden (403)",
+      "x" = "You do not have permission to access this resource",
+      "!" = "This is a permanent error - request will NOT be retried",
+      "i" = "The resource may be restricted or your IP may be blocked",
+      "i" = "Contact RIBITS support if you believe this is an error",
+      "x" = "Original error: {msg}"
+    ))
+  }
+
+  # HTTP 404 - Not Found (permanent error)
+  if (!is.null(status_code) && status_code == 404) {
     cli::cli_abort(c(
       "Resource not found (404)",
-      "i" = "The requested bank/program ID may not exist",
+      "x" = "The requested bank/program ID does not exist",
+      "!" = "This is a permanent error - request will NOT be retried",
       "i" = "Try rb_get('banks') to see available IDs",
+      "i" = "Check that your ID parameter is correct",
       "x" = "Original error: {msg}"
     ))
   }
-  
-  if (grepl("HTTP 500|HTTP 502|HTTP 503", msg)) {
-    cli::cli_abort(c(
-      "RIBITS server error",
-      "i" = "The server is experiencing issues - try again later",
-      "x" = "Original error: {msg}"
-    ))
-  }
-  
-  # Default: re-throw
 
-  stop(e)
+  # HTTP 408 - Request Timeout (retryable)
+  if (!is.null(status_code) && status_code == 408) {
+    cli::cli_abort(c(
+      "Request timeout (408)",
+      "x" = "The server did not receive the complete request in time",
+      "!" = "This error will be retried automatically",
+      "i" = "If this persists, the server may be overloaded",
+      "x" = "Original error: {msg}"
+    ))
+  }
+
+  # HTTP 429 - Rate Limited (retryable)
+  if (!is.null(status_code) && status_code == 429) {
+    cli::cli_abort(c(
+      "Rate limit exceeded (429)",
+      "x" = "Too many requests sent to the RIBITS server",
+      "!" = "This error will be retried automatically with backoff",
+      "i" = "Consider reducing rb_config(rate_limit = ...) to avoid this",
+      "i" = "Current rate limit: {.network_options$rate_limit %||% 5} requests/second",
+      "x" = "Original error: {msg}"
+    ))
+  }
+
+  # HTTP 500/502/503 - Server errors (retryable)
+  if (!is.null(status_code) && status_code >= 500 && status_code < 600) {
+    cli::cli_abort(c(
+      "RIBITS server error ({status_code})",
+      "x" = "The server encountered an internal error",
+      "!" = "This error will be retried automatically",
+      "i" = "The server may be experiencing issues - wait a few minutes",
+      "i" = "If this persists after retries, try again later",
+      "x" = "Original error: {msg}"
+    ))
+  }
+
+  # Other 4xx errors (permanent)
+  if (!is.null(status_code) && status_code >= 400 && status_code < 500) {
+    cli::cli_abort(c(
+      "Client error ({status_code})",
+      "x" = "The request was invalid",
+      "!" = "This is a permanent error - request will NOT be retried",
+      "i" = "Check your request parameters and try again",
+      "x" = "Original error: {msg}"
+    ))
+  }
+
+  # Generic error with retryability indicator
+  retry_msg <- if (is_retryable) {
+    "This error may be retried"
+  } else {
+    "This is a permanent error - will NOT be retried"
+  }
+
+  cli::cli_abort(c(
+    "Error during {context}",
+    "x" = "Original error: {msg}",
+    "!" = retry_msg,
+    "i" = "Use rb_network_failures() to see all failed requests"
+  ))
 }
 
 #' Process single item response
@@ -185,12 +268,12 @@ rb_list_generic <- function(type, ...) {
   # Handle Pagination
   while (.rb_has_next_link(data)) {
     next_url <- .rb_get_next_link(data)
-    
+
     # Direct request for next page
+    # Rate limiting now handled globally in rb_request_with_retry()
     req <- httr2::request(next_url) |>
-      httr2::req_user_agent("RIBITSr R package") |>
-      httr2::req_throttle(rate = 5 / 1)
-    
+      httr2::req_user_agent("RIBITSr R package")
+
     resp <- httr2::req_perform(req)
     data <- rb_parse_response(resp)
     

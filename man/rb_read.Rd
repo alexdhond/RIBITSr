@@ -4,7 +4,7 @@
 \alias{rb_read}
 \title{Read RIBITS CSV Report}
 \usage{
-rb_read(path, type = NULL)
+rb_read(path, type = NULL, validate = TRUE)
 }
 \arguments{
 \item{path}{Path to the CSV file.}

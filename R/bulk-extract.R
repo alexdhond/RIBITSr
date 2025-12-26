@@ -139,8 +139,7 @@ rb_bulk_ledger <- function(bank_ids = NULL,
       batch_count <- 0
     }
 
-    # Rate limiting
-    Sys.sleep(0.1)
+    # Rate limiting now handled globally in rb_request_with_retry()
   }
 
   if (progress) cli::cli_progress_done(id = pb)

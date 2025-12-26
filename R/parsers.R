@@ -1,6 +1,85 @@
 # R/parsers.R
 # Unified CSV reading functions for RIBITS reports
 
+
+#' Validate CSV content (internal)
+#'
+#' Performs validation checks on CSV files before parsing to catch common issues
+#' like HTML error pages saved as CSV, empty files, or corrupted downloads.
+#'
+#' @param path Path to CSV file
+#' @param expected_cols Optional vector of expected column names
+#'
+#' @return TRUE if valid, aborts with error if invalid
+#' @keywords internal
+#' @noRd
+.validate_csv_content <- function(path, expected_cols = NULL) {
+  # Check file size
+  info <- file.info(path)
+
+  if (info$size < 100) {
+    # File is very small - likely an error page or empty file
+    content_preview <- paste(readLines(path, n = 5, warn = FALSE), collapse = "\n")
+
+    # Check if it's an HTML error page
+    if (grepl("<html|<body|<!DOCTYPE|<head", content_preview, ignore.case = TRUE)) {
+      cli::cli_abort(c(
+        "Downloaded file is an HTML error page, not a CSV",
+        "x" = "The RIBITS server returned an error instead of data",
+        "i" = "Content preview:",
+        " " = content_preview,
+        "i" = "Try again later or check if the report type is correct"
+      ))
+    }
+
+    # Check for Oracle APEX error messages
+    if (grepl("ORA-\\d{5}|Oracle.*error|APEX.*error", content_preview, ignore.case = TRUE)) {
+      cli::cli_abort(c(
+        "Downloaded file contains an Oracle database error",
+        "x" = "The RIBITS server encountered a database error",
+        "i" = "Content preview:",
+        " " = content_preview,
+        "i" = "The RIBITS server may be experiencing issues"
+      ))
+    }
+
+    cli::cli_alert_warning("CSV file is suspiciously small ({info$size} bytes)")
+    return(FALSE)
+  }
+
+  # Check for minimum row count
+  first_lines <- readr::read_lines(path, n_max = 10, skip_empty_rows = FALSE)
+
+  if (length(first_lines) < 2) {
+    cli::cli_alert_warning("CSV has fewer than 2 lines - may be empty or corrupted")
+    return(FALSE)
+  }
+
+  # Check header contains expected columns (if provided)
+  if (!is.null(expected_cols) && length(expected_cols) > 0) {
+    # Find the header line (skip empty lines)
+    header_line <- first_lines[nchar(first_lines) > 0][1]
+
+    if (!is.na(header_line)) {
+      header_lower <- tolower(header_line)
+
+      missing_cols <- expected_cols[!sapply(expected_cols, function(col) {
+        grepl(tolower(col), header_lower, fixed = TRUE)
+      })]
+
+      if (length(missing_cols) > 0) {
+        cli::cli_alert_warning(
+          "CSV missing expected columns: {paste(missing_cols, collapse = ', ')}"
+        )
+        return(FALSE)
+      }
+    }
+  }
+
+  TRUE
+}
+
+
 #' Read RIBITS CSV Report
 #'
 #' Unified function to read any RIBITS CSV report. Automatically handles
@@ -19,24 +98,29 @@
 #' # Read potential credits (auto-detected from filename)
 #' pot <- rb_read("Potential Credits by Mitigation Type.csv")
 #' }
-rb_read <- function(path, type = NULL) {
+rb_read <- function(path, type = NULL, validate = TRUE) {
   if (!file.exists(path)) {
     rlang::abort(paste("File not found:", path))
   }
-  
- # Auto-detect type from filename if not specified
+
+  # Validate content before parsing
+  if (validate) {
+    .validate_csv_content(path)
+  }
+
+  # Auto-detect type from filename if not specified
   if (is.null(type)) {
     filename <- tolower(basename(path))
     if (grepl("potential.?credit", filename)) {
       type <- "potential_credits"
     }
   }
-  
+
   # Special parsing for potential credits
   if (!is.null(type) && type == "potential_credits") {
     return(.rb_read_potential_credits(path))
   }
-  
+
   # Standard CSV parsing
   .rb_read_generic_csv(path)
 }

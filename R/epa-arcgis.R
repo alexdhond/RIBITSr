@@ -69,7 +69,14 @@ rb_epa_query <- function(layer,
   if (!is.null(bank_ids) && length(bank_ids) > 50) {
     chunks <- split(bank_ids, ceiling(seq_along(bank_ids) / 50))
     all_results <- list()
-    
+
+    # Add progress bar for chunked queries
+    pb <- cli::cli_progress_bar(
+      paste("Fetching", layer, "geometry"),
+      total = length(chunks),
+      format = "{cli::pb_bar} {cli::pb_percent} | {cli::pb_current}/{cli::pb_total} chunks"
+    )
+
     for (i in seq_along(chunks)) {
       chunk_result <- rb_epa_query(
         layer = layer,
@@ -81,8 +88,11 @@ rb_epa_query <- function(layer,
       if (!is.null(chunk_result) && nrow(chunk_result) > 0) {
         all_results[[i]] <- chunk_result
       }
-      Sys.sleep(0.1)  # Be polite to the server
+      cli::cli_progress_update(id = pb)
+      # Rate limiting now handled globally in rb_request_with_retry()
     }
+
+    cli::cli_progress_done(id = pb)
     
     if (length(all_results) > 0) {
       combined <- do.call(rbind, all_results)
@@ -115,13 +125,21 @@ rb_epa_query <- function(layer,
 
   cli::cli_alert_info("Querying EPA ArcGIS: {layer}...")
 
-  # Make request
-  resp <- req |>
-    httr2::req_error(is_error = function(r) FALSE) |>
-    httr2::req_perform()
+  # Make request with retry logic
+  # Spatial queries can be slow for large geometries
+  resp <- rb_request_with_retry(
+    req,
+    description = paste("EPA ArcGIS:", layer),
+    timeout = 60  # Spatial queries can take longer
+  )
+
+  if (is.null(resp)) {
+    cli::cli_alert_danger("EPA ArcGIS query failed after retries")
+    return(sf::st_sf(geometry = sf::st_sfc()))
+  }
 
   if (httr2::resp_status(resp) != 200) {
-    cli::cli_alert_danger("EPA ArcGIS query failed")
+    cli::cli_alert_danger("EPA ArcGIS query returned HTTP {httr2::resp_status(resp)}")
     return(sf::st_sf(geometry = sf::st_sfc()))
   }
 

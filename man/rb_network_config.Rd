@@ -2,7 +2,7 @@
 % Please edit documentation in R/network.R
 \name{rb_network_config}
 \alias{rb_network_config}
-\title{Configure network settings (Internal)}
+\title{Configure network settings (Deprecated)}
 \usage{
 rb_network_config(
   max_retries = NULL,
@@ -31,21 +31,22 @@ are saved to a temp directory. Set to FALSE to disable checkpointing.}
 Invisibly returns current settings
 }
 \description{
-This function is internal. Network settings have sensible defaults.
+\ifelse{html}{\href{https://lifecycle.r-lib.org/articles/stages.html#deprecated}{\figure{lifecycle-deprecated.svg}{options: alt='[Deprecated]'}}}{\strong{[Deprecated]}}
+
+This function is deprecated. Please use \code{\link[=rb_config]{rb_config()}} instead for a unified
+configuration interface that includes network settings, caching, rate limiting,
+and data quality options.
 
 Set package-wide options for network behavior including retries,
 timeouts, and checkpointing.
 }
 \examples{
 \dontrun{
-# Increase retries for unreliable connection
+# DEPRECATED: Use rb_config() instead
+rb_config(max_retries = 5, timeout = 60)
+
+# Old way (still works but deprecated)
 rb_network_config(max_retries = 5, timeout = 60)
-
-# Enable checkpointing to specific directory
-rb_network_config(checkpoint_dir = "data/checkpoints")
-
-# Disable checkpointing
-rb_network_config(checkpoint_dir = FALSE)
 }
 }
 \keyword{internal}

@@ -4,10 +4,13 @@
 \alias{.get_cache_dir}
 \title{Get cache directory}
 \usage{
-.get_cache_dir(use_cache = TRUE)
+.get_cache_dir(use_cache = TRUE, persistent = NULL)
 }
 \arguments{
-\item{use_cache}{If TRUE, use persistent cache in tempdir. If FALSE, use tempdir directly.}
+\item{use_cache}{If TRUE, use cache. If FALSE, use tempdir directly.}
+
+\item{persistent}{If NULL, uses .network_options$use_persistent_cache.
+If TRUE, uses persistent user cache directory. If FALSE, uses session-only tempdir.}
 }
 \value{
 Path to cache directory
