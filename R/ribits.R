@@ -2,6 +2,134 @@
 # Main user-facing functions with automatic harmonization
 # Users should primarily use these - all complexity is hidden
 
+#' Get RIBITS data (fully harmonized)
+#'
+#' The main function for getting mitigation bank, ILF program, or umbrella data.
+#' Automatically fetches and harmonizes data from all available sources:
+#' - RIBITS API (real-time data)
+#' - EPA ArcGIS MapServer (spatial data)
+#' - RIBITS CSV reports (official records, fetched directly)
+#'
+#' No manual downloads required - everything is automatic!
+#'
+#' @param type Type of data to fetch:
+#'   - "banks" (default): Mitigation banks
+#'   - "ilf": In-Lieu Fee programs
+#'   - "umbrellas": Umbrella mitigation instruments
+#' @param state State filter (e.g., "CA", "OR", "TX")
+#' @param district USACE district filter (e.g., "Portland", "Sacramento")
+#' @param ids Optional vector of specific IDs to retrieve (bank_ids, program_ids, etc.)
+#' @param transactions Level of transaction data to include (banks only):
+#'   - "none": No transaction data (fastest)
+#'   - "basic" (default): API ledger only (~20 columns, fast, real-time data)
+#'   - "comprehensive": Full 3-source harmonization (~85 columns, slower but most complete)
+#'
+#'   The "comprehensive" option merges data from watershed CSV, API ledger, and CSV reports.
+#'   Use "basic" for quick queries, "comprehensive" for data analysis requiring maximum detail.
+#'
+#' @param spatial Include spatial data (footprints and service area geometries)? Default TRUE.
+#'   Set to FALSE for faster queries when you only need bank attributes.
+#'
+#' @param sources Which data sources to use. Default: c("api", "epa", "csv") (all sources).
+#'   - "api" = RIBITS API only (fastest, real-time, ~30 seconds)
+#'   - "epa" = EPA ArcGIS only (spatial data)
+#'   - "csv" = Direct CSV downloads (official records, slow)
+#'   - c("api", "epa", "csv") = All sources (recommended for accuracy, ~60-90 seconds)
+#'
+#'   Using all sources provides the most complete and accurate data. If a source fails,
+#'   the package automatically falls back to other sources.
+#'
+#' @param cache Cache downloaded CSV files to temp directory? Default TRUE.
+#'   Significantly speeds up repeated queries. Cache is cleared when R session ends.
+#'
+#' @param include_summaries Include comprehensive summaries in banks dataframe? Default TRUE.
+#'   When TRUE, adds summary metrics from:
+#'   - Transactions (volume, temporal patterns, geography, permittees)
+#'   - Anticipated credit releases (upcoming releases in next 5 years)
+#'   - Public notices (document counts and recency)
+#'   Set to FALSE for minimal banks dataframe with just core attributes.
+#'
+#' @param quietly Suppress progress messages? Default FALSE.
+#'
+#' @return A `ribits_data` object containing:
+#'   \item{banks/programs/umbrellas}{Summary data (tibble)}
+#'   \item{transactions}{Transaction/credit tracking data (tibble, banks only)}
+#'   \item{geometry}{Spatial data including footprints and service areas (sf object)}
+#'   \item{.meta}{Metadata including sources used and any discrepancies}
+#'
+#' @export
+#' @examples
+#' \dontrun{
+#' # Get all California banks (fully harmonized, automatic!)
+#' ca <- ribits(state = "CA")
+#'
+#' # Access the data
+#' ca$banks           # Summary data
+#' ca$transactions    # Transaction history
+#' ca$geometry        # Spatial polygons
+#'
+#' # Get comprehensive transaction data (3-source harmonization, ~85 columns)
+#' ca_full <- ribits(state = "CA", transactions = "comprehensive")
+#'
+#' # Get ILF programs
+#' ilf <- ribits(type = "ilf", state = "TX")
+#'
+#' # Get umbrella instruments
+#' umb <- ribits(type = "umbrellas", state = "FL")
+#'
+#' # Get specific banks by ID
+#' my_banks <- ribits(ids = c(17, 100, 345))
+#'
+#' # Just summary data, no spatial or transactions (fastest)
+#' summary <- ribits(state = "OR", spatial = FALSE, transactions = "none")
+#'
+#' # Only use API source (fastest, real-time)
+#' api_only <- ribits(state = "TX", sources = "api")
+#' }
+ribits <- function(type = "banks",
+                   state = NULL,
+                   district = NULL,
+                   ids = NULL,
+                   transactions = c("basic", "comprehensive", "none"),
+                   spatial = TRUE,
+                   sources = c("api", "epa", "csv"),
+                   cache = TRUE,
+                   include_summaries = TRUE,
+                   quietly = FALSE) {
+
+  type <- match.arg(type, c("banks", "ilf", "umbrellas"))
+  transactions <- match.arg(transactions)
+
+  # Determine what data to fetch
+  # Transactions only apply to banks
+  include_ledger <- transactions != "none" && type == "banks"
+  include_comprehensive <- transactions == "comprehensive" && type == "banks"
+
+  what <- if (include_ledger && spatial) {
+    "all"
+  } else if (spatial) {
+    "spatial"
+  } else if (include_ledger) {
+    "ledger"
+  } else {
+    "banks"
+  }
+
+  # Call the auto-harmonization engine
+  .ribits_engine(
+    bank_ids = ids,
+    state = state,
+    district = district,
+    what = what,
+    type = type,
+    sources = sources,
+    cache = cache,
+    quietly = quietly,
+    include_detailed_transactions = include_comprehensive,
+    include_summaries = include_summaries
+  )
+}
+
 #' Internal harmonization engine
 #' @keywords internal
 #' @noRd
@@ -33,13 +161,15 @@
     if (!is.null(district)) cli::cli_alert_info("District filter: {.val {district}}")
   }
 
+  resource_name <- switch(type,
+    banks = "bank",
+    ilf = "ILF program",
+    umbrellas = "umbrella",
+    wqt = "WQT project",
+    "resource"
+  )
+
   # Initialize result
-  # Architecture: Query ALL sources, combine/harmonize, fill gaps, detect discrepancies
-  # NEW STRUCTURE: 3 dataframes (banks, transactions, geometry) instead of 5
-  # - banks: includes contact/credit summaries
-  # - transactions: unified from watershed CSV + API + CSV ledger (if include_detailed_transactions=TRUE)
-  # - geometry: unified spatial data
-  # - .contacts: detailed contacts (if include_detailed_contacts=TRUE)
   result <- structure(
     list(
       banks = NULL,           # Summary with contact/credit columns
@@ -67,185 +197,77 @@
     class = c("ribits_data", "list")
   )
 
-  include_banks <- what %in% c("all", "banks")
-  include_ledger <- what %in% c("all", "ledger")
   include_spatial <- what %in% c("all", "spatial")
 
   # ==========================================================================
-  # Step 1: Get resource list (banks/ILF/umbrellas/WQT)
+  # Step 1: Fetch Data from Sources
   # ==========================================================================
-  resource_name <- switch(type,
-    banks = "bank",
-    ilf = "ILF program",
-    umbrellas = "umbrella",
-    wqt = "WQT project",
-    "resource"
-  )
-
   if (!quietly) cli::cli_h3("Step 1: Fetching {resource_name} list")
 
-  # Try RIBITS API first (if enabled)
-  # Note: API list only returns 3 cols (bank_id, name, url)
-  # We need to fetch detailed data for each bank to get full info (30+ cols)
-  
-  banks_ribits <- NULL
-  if (use_api) {
-    if (!quietly) cli::cli_progress_step("Querying RIBITS API...")
-    api_result <- tryCatch({
-      # First get list of bank IDs
-      bank_list <- rb_get(type, state = state, district = district)
-      
-      if (is.null(bank_list) || nrow(bank_list) == 0) {
-        list(banks = NULL, contacts = NULL)
-      } else {
-        # Find bank_id column (case-insensitive)
-        id_col <- .get_column_case_insensitive(bank_list, "bank_id")
-        if (is.na(id_col)) {
-          cli::cli_alert_warning("No bank_id column found in API list")
-          list(banks = NULL, contacts = NULL)
-        } else {
-          list_ids <- bank_list[[id_col]]
-          
-          # Filter to specific IDs if provided
-          ids_to_fetch <- if (!is.null(bank_ids)) {
-            intersect(list_ids, bank_ids)
-          } else {
-            list_ids
-          }
-        
-          if (length(ids_to_fetch) == 0) {
-            list(banks = NULL, contacts = NULL)
-          } else {
-            # Fetch detailed data for each bank (has 30+ columns vs 3 in list)
-            # Enable contacts to get sponsors/POCs/managers in the same call
-            if (!quietly) cli::cli_alert_info("Fetching detailed API data for {length(ids_to_fetch)} banks...")
-            
-            detailed <- rb_get(type, id = ids_to_fetch, ledger = FALSE, 
-                              footprint = FALSE, service_area = FALSE, contacts = TRUE)
-            
-            # Extract summary and contacts
-            banks_data <- if (is.list(detailed) && "summary" %in% names(detailed)) {
-              detailed$summary
-            } else {
-              bank_list
-            }
-            
-            contacts_data <- if (is.list(detailed) && !is.null(detailed$contacts) && 
-                                 nrow(detailed$contacts) > 0) {
-              detailed$contacts
-            } else {
-              NULL
-            }
-            
-            list(banks = banks_data, contacts = contacts_data)
-          }
-        }
-      }
-    }, error = function(e) {
-      if (!quietly) cli::cli_alert_warning("API query failed: {e$message}")
+  # 1. API
+  banks_ribits_data <- if (use_api) {
+      .fetch_ribits_api_data(type, bank_ids, state, district, quietly)
+  } else {
       list(banks = NULL, contacts = NULL)
-    })
-    
-    banks_ribits <- api_result$banks
-    
-    # Store contacts from API
-    if (!is.null(api_result$contacts) && nrow(api_result$contacts) > 0) {
-      result$contacts <- api_result$contacts
-      result$.meta$sources$contacts <- "ribits_api"
+  }
+  banks_ribits <- banks_ribits_data$banks
+  
+  # Store API contacts (temporary, will be finalized later)
+  if (!is.null(banks_ribits_data$contacts) && nrow(banks_ribits_data$contacts) > 0) {
+    result$.contacts <- banks_ribits_data$contacts
+    if (include_detailed_contacts) {
+        result$.meta$sources$contacts <- "ribits_api"
     }
   }
 
   if (!is.null(banks_ribits) && nrow(banks_ribits) > 0) {
-    if (!quietly) cli::cli_alert_success("Found {nrow(banks_ribits)} {resource_name}s from API ({ncol(banks_ribits)} columns)")
+    if (!quietly) cli::cli_alert_success("Found {nrow(banks_ribits)} {resource_name}s from API")
   }
 
-  # Also fetch from EPA ArcGIS (if enabled) - not just as fallback
-  banks_epa <- NULL
-  if (use_epa) {
-    if (!quietly) cli::cli_progress_step("Querying EPA ArcGIS...")
-    banks_epa <- tryCatch({
-      epa <- rb_epa("banks", state = state, district = district)
-      if (!is.null(epa) && nrow(epa) > 0) sf::st_drop_geometry(epa) else NULL
-    }, error = function(e) {
-      if (!quietly) cli::cli_alert_warning("EPA query failed: {e$message}")
-      NULL
-    })
+  # 2. EPA
+  banks_epa <- if (use_epa) {
+      .fetch_epa_data(type, bank_ids, state, district, quietly)
+  } else NULL
 
-    if (!is.null(banks_epa) && nrow(banks_epa) > 0) {
-      if (!quietly) cli::cli_alert_success("Found {nrow(banks_epa)} {resource_name}s from EPA")
-      if (!is.null(bank_ids)) {
-        banks_epa <- .filter_by_bank_ids(banks_epa, bank_ids, quietly = quietly)
-      }
-    }
+  if (!is.null(banks_epa) && nrow(banks_epa) > 0) {
+    if (!quietly) cli::cli_alert_success("Found {nrow(banks_epa)} {resource_name}s from EPA")
   }
 
-  # Try CSV downloads (if enabled)
-  banks_csv <- NULL
-  if (use_csv) {
-    if (!quietly) cli::cli_progress_step("Downloading CSV reports...")
+  # 3. CSV
+  banks_csv <- if (use_csv) {
+      .fetch_csv_data(type, bank_ids, state, cache, quietly)
+  } else NULL
 
-    banks_csv <- tryCatch({
-      # Use cache directory
-      cache_dir <- .get_cache_dir(cache)
-
-      # Download bank summary CSV directly
-      csv_file <- rb_download_report("banks_sites", download_dir = cache_dir)
-
-      # Read CSV
-      banks <- rb_read(csv_file)
-
-      # CSV column names differ from API/EPA - handle variations
-      # state_abbrev_list -> filter by state
-      if (!is.null(state)) {
-        state_col <- names(banks)[grepl("state", names(banks), ignore.case = TRUE)][1]
-        if (!is.na(state_col)) {
-          banks <- banks |> dplyr::filter(grepl(!!state, .data[[state_col]]))
-        }
-      }
-
-      # Ensure bank_id exists (CSV doesn't have bank_id natively)
-      banks <- .ensure_bank_id(banks, quietly = quietly)
-
-      # Filter by bank_ids if specified
-      if (!is.null(bank_ids)) {
-        banks <- .filter_by_bank_ids(banks, bank_ids, quietly = quietly)
-      }
-
-      if (!quietly && nrow(banks) > 0) {
-        cli::cli_alert_success("{nrow(banks)} banks from CSV")
-      }
-
-      banks
-    }, error = function(e) {
-      if (!quietly) cli::cli_alert_warning("CSV fetch failed: {e$message}")
-      NULL
-    })
+  if (!is.null(banks_csv) && nrow(banks_csv) > 0) {
+    if (!quietly) cli::cli_alert_success("Found {nrow(banks_csv)} {resource_name}s from CSV")
   }
 
-  # Merge and detect discrepancies if we have multiple sources
-  # Collect all available bank data sources
-  bank_sources <- list(
+  # ==========================================================================
+  # Step 2: Merge Sources
+  # ==========================================================================
+  
+  available_sources <- list(
     ribits_api = banks_ribits,
     epa_arcgis = banks_epa,
     ribits_csv = banks_csv
   )
+  available_sources <- purrr::keep(available_sources, ~ !is.null(.) && nrow(.) > 0)
   
-  # Filter to non-empty sources
-  available_sources <- purrr::keep(bank_sources, ~ !is.null(.) && nrow(.) > 0)
-  
-  if (length(available_sources) > 1) {
-    # Detect discrepancies between sources
-    source_names <- names(available_sources)
-    for (i in 1:(length(available_sources) - 1)) {
-      for (j in (i + 1):length(available_sources)) {
-        disc <- .compare_dataframes(
-          available_sources[[i]], available_sources[[j]],
-          id_col = "bank_id",
-          source1_name = source_names[i],
-          source2_name = source_names[j]
-        )
-        if (!is.null(disc) && nrow(disc) > 0) {
-          result$.meta$discrepancies <- dplyr::bind_rows(result$.meta$discrepancies, disc)
+  if (length(available_sources) > 0) {
+    # Detect discrepancies
+    if (length(available_sources) > 1) {
+      source_names <- names(available_sources)
+      for (i in 1:(length(available_sources) - 1)) {
+        for (j in (i + 1):length(available_sources)) {
+          disc <- .compare_dataframes(
+            available_sources[[i]], available_sources[[j]],
+            id_col = "bank_id",
+            source1_name = source_names[i],
+            source2_name = source_names[j]
+          )
+          if (!is.null(disc) && nrow(disc) > 0) {
+            result$.meta$discrepancies <- dplyr::bind_rows(result$.meta$discrepancies, disc)
+          }
         }
       }
     }
@@ -258,58 +280,36 @@
     )
     result$.meta$sources$banks <- paste(names(available_sources), collapse = " + ")
     
-    if (!quietly) {
+    if (!quietly && length(available_sources) > 1) {
       cli::cli_alert_info("Merged {length(available_sources)} sources: {result$.meta$sources$banks}")
       cli::cli_alert_info("Result has {ncol(result$banks)} columns (preserving all from each source)")
     }
-  } else if (length(available_sources) == 1) {
-    result$banks <- available_sources[[1]]
-    result$.meta$sources$banks <- names(available_sources)[1]
+  } else {
+     # If no data found at all
+     if (!quietly) cli::cli_alert_warning("No banks found matching criteria")
+     return(result)
   }
 
-  # Get bank IDs for subsequent queries (handle both column naming conventions)
-  if (!is.null(result$banks) && nrow(result$banks) > 0) {
-    # Find bank_id column
-    id_col <- .get_column_case_insensitive(result$banks, "bank_id")
-    if (!is.na(id_col)) {
-      query_ids <- result$banks[[id_col]]
-    } else {
-      query_ids <- bank_ids
-    }
-  } else {
-    query_ids <- bank_ids
-  }
+  # Get bank IDs for subsequent queries
+  query_ids <- if (!is.null(result$banks)) .col_get(result$banks, "bank_id") else NULL
 
   if (is.null(query_ids) || length(query_ids) == 0) {
-    if (!quietly) cli::cli_alert_warning("No banks found matching criteria")
+    if (!quietly) cli::cli_alert_warning("No valid bank IDs found after merge")
     return(result)
   }
 
-  if (!quietly) cli::cli_alert_success("Found {length(query_ids)} banks")
+  if (!quietly) cli::cli_alert_success("Processing {length(query_ids)} banks...")
 
   # ==========================================================================
-  # Step 2: Extract contacts for summarization (ALWAYS needed)
+  # Step 3: Summaries (Contacts, Credits, etc.)
   # ==========================================================================
-  if (!quietly) cli::cli_h3("Step 2: Extracting contacts and credit data")
+  if (!quietly) cli::cli_h3("Step 2: Creating Summaries")
 
-  # Extract contacts from API data (needed for summary even if not returning detailed)
-  contacts_detailed <- NULL
-  if (!is.null(banks_ribits) && nrow(banks_ribits) > 0) {
-    contacts_detailed <- rb_extract_contacts(banks_ribits)
-    if (!quietly && !is.null(contacts_detailed) && nrow(contacts_detailed) > 0) {
-      cli::cli_alert_success("{nrow(contacts_detailed)} contacts extracted from API")
-    }
-  }
-
-  # Store detailed contacts if requested
-  if (include_detailed_contacts && !is.null(contacts_detailed)) {
-    result$.contacts <- contacts_detailed
-    result$.meta$sources$contacts <- "ribits_api"
-  }
-
-  # ==========================================================================
-  # Step 3: Fetch and summarize credit classification data
-  # ==========================================================================
+  # Contacts Summary
+  contacts_detailed <- result$.contacts
+  contact_summary <- .summarize_contacts(contacts_detailed)
+  
+  # Credit Summary
   credit_class_detailed <- NULL
   if (use_csv) {
     credit_class_detailed <- .safe_fetch(
@@ -317,94 +317,66 @@
       description = "Credit classification",
       quietly = quietly
     )
-
     if (!quietly && !is.null(credit_class_detailed) && nrow(credit_class_detailed) > 0) {
       cli::cli_alert_success("{nrow(credit_class_detailed)} credit classifications")
     }
   }
-
-  # ==========================================================================
-  # Step 3b: Fetch additional CSV reports for summaries (if requested)
-  # ==========================================================================
-  credit_releases_detailed <- NULL
-  public_notices_detailed <- NULL
-
-  if (include_summaries && use_csv) {
-    # Fetch credit releases (anticipated future releases)
-    credit_releases_detailed <- .safe_fetch(
-      fn = function() .fetch_csv_with_bank_id("credit_releases", query_ids, cache, quietly),
-      description = "Credit releases",
-      quietly = TRUE  # Don't warn if not available
-    )
-
-    # Fetch public notices
-    public_notices_detailed <- .safe_fetch(
-      fn = function() .fetch_csv_with_bank_id("public_notices", query_ids, cache, quietly),
-      description = "Public notices",
-      quietly = TRUE  # Don't warn if not available
-    )
-  }
-
-  # ==========================================================================
-  # Step 4: Create summaries and merge into banks
-  # ==========================================================================
-  if (!quietly) cli::cli_progress_step("Creating summaries...")
-
-  # Create all summaries
-  contact_summary <- .summarize_contacts(contacts_detailed)
   credit_summary <- .summarize_credits(credit_class_detailed)
-
-  transaction_summary <- NULL
+  
+  # Releases & Notices
   credit_releases_summary <- NULL
   public_notices_summary <- NULL
 
-  if (include_summaries) {
-    # Transaction summary will be created after transactions are fetched
-    # (see Step 5)
+  if (include_summaries && use_csv) {
+    # Credit releases
+    cr_detailed <- .safe_fetch(
+      fn = function() .fetch_csv_with_bank_id("credit_releases", query_ids, cache, quietly),
+      description = "Credit releases",
+      quietly = TRUE
+    )
+    if (!is.null(cr_detailed)) credit_releases_summary <- .summarize_credit_releases(cr_detailed)
 
-    # Summarize credit releases
-    if (!is.null(credit_releases_detailed) && nrow(credit_releases_detailed) > 0) {
-      credit_releases_summary <- .summarize_credit_releases(credit_releases_detailed)
-    }
-
-    # Summarize public notices
-    if (!is.null(public_notices_detailed) && nrow(public_notices_detailed) > 0) {
-      public_notices_summary <- .summarize_public_notices(public_notices_detailed)
-    }
+    # Public notices
+    pn_detailed <- .safe_fetch(
+      fn = function() .fetch_csv_with_bank_id("public_notices", query_ids, cache, quietly),
+      description = "Public notices",
+      quietly = TRUE
+    )
+    if (!is.null(pn_detailed)) public_notices_summary <- .summarize_public_notices(pn_detailed)
   }
 
   # Merge summaries into banks
   if (!is.null(result$banks) && nrow(result$banks) > 0) {
     if (!is.null(contact_summary) && nrow(contact_summary) > 0) {
-      result$banks <- result$banks |>
-        dplyr::left_join(contact_summary, by = "bank_id")
+      result$banks <- dplyr::left_join(result$banks, contact_summary, by = "bank_id")
       if (!quietly) cli::cli_alert_success("Added contact summaries")
     }
-
     if (!is.null(credit_summary) && nrow(credit_summary) > 0) {
-      result$banks <- result$banks |>
-        dplyr::left_join(credit_summary, by = "bank_id")
+      result$banks <- dplyr::left_join(result$banks, credit_summary, by = "bank_id")
       if (!quietly) cli::cli_alert_success("Added credit summaries")
     }
-
     if (!is.null(credit_releases_summary) && nrow(credit_releases_summary) > 0) {
-      result$banks <- result$banks |>
-        dplyr::left_join(credit_releases_summary, by = "bank_id")
+      result$banks <- dplyr::left_join(result$banks, credit_releases_summary, by = "bank_id")
       if (!quietly) cli::cli_alert_success("Added anticipated release summaries")
     }
-
     if (!is.null(public_notices_summary) && nrow(public_notices_summary) > 0) {
-      result$banks <- result$banks |>
-        dplyr::left_join(public_notices_summary, by = "bank_id")
+      result$banks <- dplyr::left_join(result$banks, public_notices_summary, by = "bank_id")
       if (!quietly) cli::cli_alert_success("Added public notice summaries")
     }
   }
 
+  # Finalize contacts
+  if (!include_detailed_contacts) {
+      result$.contacts <- NULL
+  } else if (!is.null(result$.contacts)) {
+      result$.contacts <- .finalize_df(result$.contacts, type = "contacts")
+  }
+
   # ==========================================================================
-  # Step 5: Fetch detailed transactions (if requested)
+  # Step 4: Transactions
   # ==========================================================================
   if (include_detailed_transactions) {
-    if (!quietly) cli::cli_h3("Step 5: Fetching unified transaction data")
+    if (!quietly) cli::cli_h3("Step 3: Fetching unified transaction data")
 
     txn_result <- tryCatch({
       cache_dir <- if (cache) file.path(tempdir(), "ribits_cache") else tempdir()
@@ -426,176 +398,113 @@
       if (include_summaries && !is.null(result$banks) && nrow(result$banks) > 0) {
         transaction_summary <- .summarize_transactions(result$transactions)
         if (!is.null(transaction_summary) && nrow(transaction_summary) > 0) {
-          result$banks <- result$banks |>
-            dplyr::left_join(transaction_summary, by = "bank_id")
+          result$banks <- dplyr::left_join(result$banks, transaction_summary, by = "bank_id")
           if (!quietly) cli::cli_alert_success("Added transaction summaries")
         }
       }
+      
+      result$transactions <- .finalize_df(result$transactions, type = "transactions")
     }
   }
 
   # ==========================================================================
-  # Step 6: Get spatial data (harmonized from both sources)
+  # Step 5: Spatial Data
   # ==========================================================================
   if (include_spatial) {
-    if (!quietly) cli::cli_h3("Step 6: Fetching spatial data")
-
-    # Get from EPA ArcGIS (faster for bulk) - if enabled
-    epa_footprints <- if (use_epa) {
-      if (!quietly) cli::cli_progress_step("Querying EPA footprints...")
-      tryCatch({
-        fp <- rb_epa("footprints", bank_ids = query_ids)
-        if (!is.null(fp) && nrow(fp) > 0) {
-          fp$source <- "epa_arcgis"
-          if (!quietly) cli::cli_alert_success("{nrow(fp)} footprints from EPA")
-        }
-        fp
-      }, error = function(e) {
-        if (!quietly) cli::cli_alert_warning("EPA footprints failed: {e$message}")
-        NULL
-      })
-    } else {
-      NULL
+    spatial_res <- .fetch_harmonized_spatial(query_ids, use_epa, use_api, quietly)
+    
+    if (nrow(spatial_res$discrepancies) > 0) {
+      result$.meta$discrepancies <- dplyr::bind_rows(result$.meta$discrepancies, spatial_res$discrepancies)
     }
+    
+    footprints <- spatial_res$footprints
+    service_areas <- spatial_res$service_areas
 
-    epa_service_areas <- if (use_epa) {
-      if (!quietly) cli::cli_progress_step("Querying EPA service areas...")
-      tryCatch({
-        sa <- rb_epa("service_areas", bank_ids = query_ids)
-        if (!is.null(sa) && nrow(sa) > 0) {
-          sa$source <- "epa_arcgis"
-          if (!quietly) cli::cli_alert_success("{nrow(sa)} service areas from EPA")
-        }
-        sa
-      }, error = function(e) {
-        if (!quietly) cli::cli_alert_warning("EPA service areas failed: {e$message}")
-        NULL
-      })
-    } else {
-      NULL
-    }
-
-    # Get from RIBITS API for banks missing from EPA (sample if many) - if enabled
-    # Find bank_id column (case-insensitive)
-    epa_fp_ids <- if (!is.null(epa_footprints)) {
-      fp_id_col <- .get_column_case_insensitive(epa_footprints, "bank_id")
-      if (!is.na(fp_id_col)) epa_footprints[[fp_id_col]] else integer()
-    } else integer()
-    missing_fp_ids <- setdiff(query_ids, epa_fp_ids)
-
-    ribits_footprints <- NULL
-    if (use_api && length(missing_fp_ids) > 0 && length(missing_fp_ids) <= 30) {
-      if (!quietly) cli::cli_progress_step("Fetching {length(missing_fp_ids)} missing footprints from API...")
-      ribits_fp_list <- list()
-      for (bid in missing_fp_ids) {
-        tryCatch({
-          bd <- rb_get("banks", id = bid, footprint = TRUE, ledger = FALSE,
-                       service_area = FALSE, contacts = FALSE)
-          if (!is.null(bd$footprint) && nrow(bd$footprint) > 0) {
-            fp <- bd$footprint
-            fp$source <- "ribits_api"
-            fp$bank_id <- bid
-            ribits_fp_list[[length(ribits_fp_list) + 1]] <- fp
-          }
-        }, error = function(e) NULL)
-        Sys.sleep(0.05)
-      }
-      if (length(ribits_fp_list) > 0) {
-        ribits_footprints <- dplyr::bind_rows(ribits_fp_list)
-        if (!quietly) cli::cli_alert_success("{nrow(ribits_footprints)} additional footprints from API")
-      }
-    }
-
-    # Combine footprints into temporary variable (will be added to unified geometry)
-    footprints_data <- NULL
-    if (!is.null(epa_footprints) || !is.null(ribits_footprints)) {
-      all_fp <- list()
-      if (!is.null(epa_footprints) && nrow(epa_footprints) > 0) {
-        all_fp[[1]] <- epa_footprints
-      }
-      if (!is.null(ribits_footprints) && nrow(ribits_footprints) > 0) {
-        all_fp[[length(all_fp) + 1]] <- ribits_footprints
-      }
-      footprints_data <- tryCatch(dplyr::bind_rows(all_fp), error = function(e) all_fp[[1]])
-
-      # Check for discrepancies in overlapping data
-      if (!is.null(epa_footprints) && !is.null(ribits_footprints)) {
-        epa_fp_col <- .get_column_case_insensitive(epa_footprints, "bank_id")
-        rib_fp_col <- .get_column_case_insensitive(ribits_footprints, "bank_id")
-        if (!is.na(epa_fp_col) && !is.na(rib_fp_col)) {
-          overlap_ids <- intersect(epa_footprints[[epa_fp_col]], ribits_footprints[[rib_fp_col]])
-          for (bid in overlap_ids) {
-            disc <- .compare_geometries(
-              ribits_footprints[ribits_footprints[[rib_fp_col]] == bid, ],
-              epa_footprints[epa_footprints[[epa_fp_col]] == bid, ],
-              bid, "footprint"
-            )
-            if (!is.null(disc)) {
-              result$.meta$discrepancies <- dplyr::bind_rows(
-                result$.meta$discrepancies, disc
-              )
-            }
+    # Construct wide geometry (one row per bank)
+    if (!is.null(result$banks) && nrow(result$banks) > 0) {
+      geom_base <- result$banks |>
+        dplyr::select(dplyr::any_of(c("bank_id", "bank_name", "bank_status"))) |>
+        dplyr::distinct()
+      
+      # 1. Centroids
+      centroids <- NULL
+      if (.col_exists(result$banks, "bank_location_centroid")) {
+        centroids_list <- list()
+        for (i in seq_len(nrow(result$banks))) {
+          centroid_json <- result$banks$bank_location_centroid[i]
+          bid <- result$banks$bank_id[i]
+          if (!is.na(centroid_json) && nchar(centroid_json) > 10) {
+            tryCatch({
+              pt <- sf::st_read(centroid_json, quiet = TRUE, drivers = "GeoJSON")
+              if (nrow(pt) > 0) {
+                centroids_list[[as.character(bid)]] <- sf::st_geometry(pt)[[1]]
+              }
+            }, error = function(e) NULL)
           }
         }
+        if (length(centroids_list) > 0) {
+          centroids <- tibble::tibble(
+            bank_id = as.integer(names(centroids_list)),
+            centroid = sf::st_sfc(centroids_list, crs = 4326)
+          )
+        }
       }
+      
+      # 2. Footprints
+      fp_wide <- NULL
+      if (!is.null(footprints) && nrow(footprints) > 0 && inherits(footprints, "sf")) {
+          fp_wide <- footprints |>
+            dplyr::group_by(bank_id) |>
+            dplyr::summarise(footprint = sf::st_union(geometry), .groups = "drop") |>
+            sf::st_as_sf()
+      }
+
+      # 3. Service Areas
+      sa_wide <- NULL
+      if (!is.null(service_areas) && nrow(service_areas) > 0 && inherits(service_areas, "sf")) {
+          sa_wide <- service_areas |>
+            dplyr::group_by(bank_id) |>
+            dplyr::summarise(service_area = sf::st_union(geometry), .groups = "drop") |>
+            sf::st_as_sf()
+      }
+      
+      # Join all
+      geom_wide <- geom_base
+      
+      if (!is.null(centroids)) {
+        geom_wide <- dplyr::left_join(geom_wide, centroids, by = "bank_id")
+      } else {
+        geom_wide$centroid <- sf::st_sfc(lapply(seq_len(nrow(geom_wide)), function(x) sf::st_point()), crs = 4326)
+      }
+      
+      if (!is.null(fp_wide)) {
+        df_fp <- sf::st_drop_geometry(fp_wide)
+        df_fp$footprint <- sf::st_geometry(fp_wide)
+        geom_wide <- dplyr::left_join(geom_wide, df_fp, by = "bank_id")
+      } else {
+         geom_wide$footprint <- sf::st_sfc(lapply(seq_len(nrow(geom_wide)), function(x) sf::st_polygon()), crs = 4326)
+      }
+      
+      if (!is.null(sa_wide)) {
+        df_sa <- sf::st_drop_geometry(sa_wide)
+        df_sa$service_area <- sf::st_geometry(sa_wide)
+        geom_wide <- dplyr::left_join(geom_wide, df_sa, by = "bank_id")
+      } else {
+         geom_wide$service_area <- sf::st_sfc(lapply(seq_len(nrow(geom_wide)), function(x) sf::st_polygon()), crs = 4326)
+      }
+      
+      result$geometry <- sf::st_as_sf(geom_wide, sf_column_name = "centroid")
       result$.meta$sources$geometry <- "epa_arcgis + ribits_api"
-    }
-
-    # Service areas (EPA ArcGIS + API fallback)
-    # Get API service areas for banks missing from EPA
-    epa_sa_ids <- if (!is.null(epa_service_areas) && nrow(epa_service_areas) > 0) {
-      sa_id_col <- .get_column_case_insensitive(epa_service_areas, "bank_id")
-      if (!is.na(sa_id_col)) epa_service_areas[[sa_id_col]] else integer()
-    } else integer()
-    missing_sa_ids <- setdiff(query_ids, epa_sa_ids)
-    
-    ribits_service_areas <- NULL
-    if (use_api && length(missing_sa_ids) > 0 && length(missing_sa_ids) <= 30) {
-      if (!quietly) cli::cli_progress_step("Fetching {length(missing_sa_ids)} service areas from API...")
-      ribits_sa_list <- list()
-      for (bid in missing_sa_ids) {
-        tryCatch({
-          bd <- rb_get("banks", id = bid, service_area = TRUE, footprint = FALSE,
-                       ledger = FALSE, contacts = FALSE)
-          if (!is.null(bd$service_area) && nrow(bd$service_area) > 0) {
-            sa <- bd$service_area
-            sa$source <- "ribits_api"
-            sa$bank_id <- bid
-            ribits_sa_list[[length(ribits_sa_list) + 1]] <- sa
-          }
-        }, error = function(e) NULL)
-        Sys.sleep(0.05)
+      
+      if (!quietly) {
+        n_fp <- if (!is.null(footprints)) nrow(footprints) else 0
+        n_sa <- if (!is.null(service_areas)) nrow(service_areas) else 0
+        cli::cli_alert_success("{n_fp} footprints, {n_sa} service areas")
       }
-      if (length(ribits_sa_list) > 0) {
-        ribits_service_areas <- dplyr::bind_rows(ribits_sa_list)
-        if (!quietly) cli::cli_alert_success("{nrow(ribits_service_areas)} service areas from API")
-      }
-    }
-    
-    # Combine service areas into temporary variable (will be added to unified geometry)
-    service_areas_data <- NULL
-    if (!is.null(epa_service_areas) || !is.null(ribits_service_areas)) {
-      all_sa <- list()
-      if (!is.null(epa_service_areas) && nrow(epa_service_areas) > 0) {
-        all_sa[[1]] <- epa_service_areas
-      }
-      if (!is.null(ribits_service_areas) && nrow(ribits_service_areas) > 0) {
-        all_sa[[length(all_sa) + 1]] <- ribits_service_areas
-      }
-      if (length(all_sa) > 0) {
-        service_areas_data <- tryCatch(dplyr::bind_rows(all_sa), error = function(e) all_sa[[1]])
-      }
-    }
-
-    if (!quietly) {
-      n_fp <- if (!is.null(footprints_data)) nrow(footprints_data) else 0
-      n_sa <- if (!is.null(service_areas_data)) nrow(service_areas_data) else 0
-      cli::cli_alert_success("{n_fp} footprints, {n_sa} service areas")
     }
   } else {
-    # Initialize to NULL if not fetching spatial
-    footprints_data <- NULL
-    service_areas_data <- NULL
+     # Initialize to NULL if not fetching spatial
+     # (Already done in struct init)
   }
 
   # ==========================================================================
@@ -660,12 +569,12 @@
       }
       
       # 2. Extract footprints (one per bank_id)
-      footprints <- NULL
-      if (!is.null(footprints_data) && nrow(footprints_data) > 0 &&
-          inherits(footprints_data, "sf")) {
+      fp_wide <- NULL
+      if (!is.null(footprints) && nrow(footprints) > 0 &&
+          inherits(footprints, "sf")) {
         # Names already cleaned by rb_epa_query()
-        if ("bank_id" %in% names(footprints_data)) {
-          footprints <- footprints_data |>
+        if ("bank_id" %in% names(footprints)) {
+          fp_wide <- footprints |>
             dplyr::group_by(bank_id) |>
             dplyr::summarise(footprint = sf::st_union(geometry), .groups = "drop") |>
             sf::st_as_sf()
@@ -673,12 +582,12 @@
       }
 
       # 3. Extract service areas (one per bank_id)
-      service_areas <- NULL
-      if (!is.null(service_areas_data) && nrow(service_areas_data) > 0 &&
-          inherits(service_areas_data, "sf")) {
+      sa_wide <- NULL
+      if (!is.null(service_areas) && nrow(service_areas) > 0 &&
+          inherits(service_areas, "sf")) {
         # Names already cleaned by rb_epa_query()
-        if ("bank_id" %in% names(service_areas_data)) {
-          service_areas <- service_areas_data |>
+        if ("bank_id" %in% names(service_areas)) {
+          sa_wide <- service_areas |>
             dplyr::group_by(bank_id) |>
             dplyr::summarise(service_area = sf::st_union(geometry), .groups = "drop") |>
             sf::st_as_sf()
@@ -698,9 +607,9 @@
         }
         
         # Add footprints
-        if (!is.null(footprints)) {
-          fp_df <- sf::st_drop_geometry(footprints)
-          fp_df$footprint <- sf::st_geometry(footprints)
+        if (!is.null(fp_wide)) {
+          fp_df <- sf::st_drop_geometry(fp_wide)
+          fp_df$footprint <- sf::st_geometry(fp_wide)
           geom_wide <- dplyr::left_join(geom_wide, fp_df, by = "bank_id")
         } else {
           geom_wide$footprint <- sf::st_sfc(lapply(seq_len(nrow(geom_wide)), 
@@ -708,9 +617,9 @@
         }
         
         # Add service areas
-        if (!is.null(service_areas)) {
-          sa_df <- sf::st_drop_geometry(service_areas)
-          sa_df$service_area <- sf::st_geometry(service_areas)
+        if (!is.null(sa_wide)) {
+          sa_df <- sf::st_drop_geometry(sa_wide)
+          sa_df$service_area <- sf::st_geometry(sa_wide)
           geom_wide <- dplyr::left_join(geom_wide, sa_df, by = "bank_id")
         } else {
           geom_wide$service_area <- sf::st_sfc(lapply(seq_len(nrow(geom_wide)), 
@@ -723,7 +632,7 @@
         geom_wide
       }, error = function(e) {
         # Fallback: just return footprints if available
-        if (!is.null(footprints_data)) footprints_data else NULL
+        if (!is.null(footprints)) footprints else NULL
       })
     }
   }
@@ -763,7 +672,9 @@
     # Report discrepancies
     n_disc <- nrow(result$.meta$discrepancies)
     if (n_disc > 0) {
-      cli::cli_alert_warning("{n_disc} discrepancies detected - use {.code discrepancies(result)} to view")
+      cli::cli_h2("Data Quality")
+      cli::cli_alert_warning("{n_disc} discrepancies between sources")
+      cli::cli_text("Use {.code $discrepancies()} to view details")
     }
     
     cli::cli_alert_success("Completed in {round(result$.meta$timing$duration_secs, 1)}s")
