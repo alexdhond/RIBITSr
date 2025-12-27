@@ -1,5 +1,15 @@
 # R/discrepancy-handling.R
 # Comprehensive discrepancy detection and resolution system
+#
+# NOTE: This file is being refactored into smaller, focused modules:
+# - R/discrepancy-config.R (COMPLETE) - Configuration and priority rules (123 lines)
+# - R/discrepancy-compare.R (COMPLETE) - Value and dataframe comparison logic (294 lines)
+# - R/discrepancy-resolve.R (TODO) - Resolution and auto-harmonization
+# - R/discrepancy-report.R (TODO) - Reporting and export functions
+# - R/discrepancy-merge.R (TODO) - Merging utilities
+#
+# Original size: 1,052 lines → Remaining: ~635 lines (target: <500 lines per file)
+# See CLAUDE.md for refactoring progress
 
 # =============================================================================
 # CONFIGURATION & PRIORITY RULES

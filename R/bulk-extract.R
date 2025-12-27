@@ -106,13 +106,20 @@ rb_bulk_ledger <- function(bank_ids = NULL,
 
   for (bank_id in remaining_ids) {
     # Get bank data with ledger
-    bank_data <- tryCatch({
-      rb_get("banks", id = bank_id, ledger = TRUE,
-             service_area = FALSE, footprint = FALSE, contacts = FALSE)
+    result <- tryCatch({
+      list(
+        data = rb_get("banks", id = bank_id, ledger = TRUE,
+                     service_area = FALSE, footprint = FALSE, contacts = FALSE),
+        error = FALSE
+      )
     }, error = function(e) {
-      n_failures <<- n_failures + 1
-      NULL
+      list(data = NULL, error = TRUE)
     })
+
+    bank_data <- result$data
+    if (result$error) {
+      n_failures <- n_failures + 1
+    }
 
     if (!is.null(bank_data) && !is.null(bank_data$ledger) &&
         nrow(bank_data$ledger) > 0) {

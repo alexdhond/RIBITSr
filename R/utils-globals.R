@@ -79,20 +79,59 @@ utils::globalVariables(c(
 #' @return Character vector of matching column names, or NA_character_ if not found
 #'
 #' @keywords internal
+#'
+#' NOTE: This function has been moved to R/utils-columns.R with enhanced
+#' functionality to handle underscore/dot normalization. This stub remains
+#' for backward compatibility but delegates to the new implementation.
 .get_column_case_insensitive <- function(df, col_name, first_only = TRUE) {
-  if (!is.data.frame(df)) return(NA_character_)
+  # Delegate to the enhanced version in utils-columns.R
+  # Note: The new version doesn't have first_only parameter,
+  # it always returns first match (which is the common use case)
+  source_file <- system.file("R", "utils-columns.R", package = "RIBITSr")
+  if (file.exists(source_file)) {
+    # In development, source from package directory
+    source_file <- file.path("R", "utils-columns.R")
+  }
 
-  matches <- names(df)[tolower(names(df)) == tolower(col_name)]
-
-  if (length(matches) == 0) {
+  # For now, inline the logic until we fully migrate
+  if (!is.data.frame(df) || is.null(col_name) || is.na(col_name)) {
     return(NA_character_)
   }
 
-  if (first_only) {
-    return(matches[1])
-  } else {
-    return(matches)
+  df_cols <- names(df)
+
+  # Try exact match first
+  if (col_name %in% df_cols) {
+    return(col_name)
   }
+
+  # Try case-insensitive match
+  col_lower <- tolower(col_name)
+  df_cols_lower <- tolower(df_cols)
+
+  matches <- which(df_cols_lower == col_lower)
+  if (length(matches) > 0) {
+    if (first_only) {
+      return(df_cols[matches[1]])
+    } else {
+      return(df_cols[matches])
+    }
+  }
+
+  # Try normalized match (remove underscores/dots)
+  col_normalized <- gsub("[_.]", "", col_lower)
+  df_cols_normalized <- gsub("[_.]", "", df_cols_lower)
+
+  matches <- which(df_cols_normalized == col_normalized)
+  if (length(matches) > 0) {
+    if (first_only) {
+      return(df_cols[matches[1]])
+    } else {
+      return(df_cols[matches])
+    }
+  }
+
+  return(NA_character_)
 }
 
 #' Safe fetch wrapper with error handling

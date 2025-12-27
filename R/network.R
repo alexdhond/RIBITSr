@@ -166,66 +166,73 @@ rb_request_with_retry <- function(req,
     # Apply rate limiting before making request
     .apply_rate_limit()
 
-    result <- tryCatch({
+    result_info <- tryCatch({
       resp <- httr2::req_perform(req)
 
       if (httr2::resp_status(resp) >= 400) {
-        last_status_code <<- httr2::resp_status(resp)
-        last_error <- paste("HTTP", last_status_code)
+        status_code <- httr2::resp_status(resp)
+        error_msg <- paste("HTTP", status_code)
 
         # Check if this is a retryable error
-        if (!.is_retryable_error(last_error, last_status_code)) {
-          is_permanent_error <<- TRUE
+        is_perm <- !.is_retryable_error(error_msg, status_code)
+        if (is_perm) {
           if (verbose) {
-            cli::cli_alert_danger("{description}: {last_error} (permanent error, not retrying)")
+            cli::cli_alert_danger("{description}: {error_msg} (permanent error, not retrying)")
           }
         } else if (verbose) {
           retry_msg <- if (attempt < max_retries) " (will retry)" else ""
-          cli::cli_alert_warning("{description}: {last_error}{retry_msg}")
+          cli::cli_alert_warning("{description}: {error_msg}{retry_msg}")
         }
 
-        NULL
+        list(response = NULL, error = error_msg, status_code = status_code, is_permanent = is_perm)
       } else {
-        resp
+        list(response = resp, error = NULL, status_code = NULL, is_permanent = FALSE)
       }
     },
     httr2_failure = function(e) {
-      last_error <<- conditionMessage(e)
+      error_msg <- conditionMessage(e)
+      status_code <- NULL
 
       # Try to extract status code from error message
-      if (grepl("HTTP (\\d{3})", last_error)) {
-        last_status_code <<- as.integer(sub(".*HTTP (\\d{3}).*", "\\1", last_error))
+      if (grepl("HTTP (\\d{3})", error_msg)) {
+        status_code <- as.integer(sub(".*HTTP (\\d{3}).*", "\\1", error_msg))
       }
 
       # Check if retryable
-      if (!.is_retryable_error(last_error, last_status_code)) {
-        is_permanent_error <<- TRUE
+      is_perm <- !.is_retryable_error(error_msg, status_code)
+      if (is_perm) {
         if (verbose) {
-          cli::cli_alert_danger("{description}: {last_error} (permanent error, not retrying)")
+          cli::cli_alert_danger("{description}: {error_msg} (permanent error, not retrying)")
         }
       } else if (verbose) {
-        if (grepl("timed out|timeout", last_error, ignore.case = TRUE)) {
+        if (grepl("timed out|timeout", error_msg, ignore.case = TRUE)) {
           retry_msg <- if (attempt < max_retries) " (will retry)" else ""
           cli::cli_alert_warning("{description}: Request timed out after {timeout}s{retry_msg}")
         } else {
           retry_msg <- if (attempt < max_retries) " (will retry)" else ""
-          cli::cli_alert_warning("{description}: {last_error}{retry_msg}")
+          cli::cli_alert_warning("{description}: {error_msg}{retry_msg}")
         }
       }
 
-      NULL
+      list(response = NULL, error = error_msg, status_code = status_code, is_permanent = is_perm)
     },
     error = function(e) {
-      last_error <<- conditionMessage(e)
+      error_msg <- conditionMessage(e)
 
       # Generic errors are usually retryable
       if (verbose) {
         retry_msg <- if (attempt < max_retries) " (will retry)" else ""
-        cli::cli_alert_warning("{description}: {last_error}{retry_msg}")
+        cli::cli_alert_warning("{description}: {error_msg}{retry_msg}")
       }
 
-      NULL
+      list(response = NULL, error = error_msg, status_code = NULL, is_permanent = FALSE)
     })
+
+    # Update state from result_info
+    result <- result_info$response
+    last_error <- result_info$error
+    last_status_code <- result_info$status_code
+    is_permanent_error <- result_info$is_permanent
 
     if (!is.null(result)) {
       if (attempt > 1 && verbose) {
@@ -566,12 +573,16 @@ rb_batch_process <- function(items,
 
   for (item in remaining) {
     # Process item
-    result <- tryCatch({
-      process_fn(item)
+    result_info <- tryCatch({
+      list(data = process_fn(item), error = FALSE)
     }, error = function(e) {
-      n_failures <<- n_failures + 1
-      NULL
+      list(data = NULL, error = TRUE)
     })
+
+    result <- result_info$data
+    if (result_info$error) {
+      n_failures <- n_failures + 1
+    }
 
     if (!is.null(result)) {
       results[[length(results) + 1]] <- result
