@@ -3,6 +3,8 @@ Title: R Interface to the RIBITS API
 Version: 0.0.0.9000
 Authors@R:
     person("Alexander", "Dhond", , "alexander.k.dhond@gmail.com", role = c("aut", "cre"))
+Author: Alexander Dhond [aut, cre]
+Maintainer: Alexander Dhond <alexander.k.dhond@gmail.com>
 Description: Provides an R interface to interact with the Regulatory In-lieu fee and Bank Information Tracking System (RIBITS) API.
     This package facilitates the download and analysis of mitigation banking data directly within R.
 License: MIT + file LICENSE
