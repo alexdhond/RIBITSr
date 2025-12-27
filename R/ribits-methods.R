@@ -2,6 +2,9 @@
 # S3 methods for ribits_data objects
 # Provides print, plot, dplyr verbs, and other convenient interfaces
 
+# Declare global variables for R CMD check
+utils::globalVariables(c("confidence", "n", "resolution_rule"))
+
 #' Print method for ribits_data
 #'
 #' @param x A ribits_data object

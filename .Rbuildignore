@@ -12,4 +12,5 @@
 ^data/ribits_cache$
 ^IMPLEMENTATION_SUMMARY\.md$
 ^TEST_RESULTS\.md$
+^DATA_QUALITY_TEST_REPORT\.md$
 ^data-raw$
