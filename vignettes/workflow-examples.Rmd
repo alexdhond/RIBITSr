@@ -118,8 +118,15 @@ transactions$transactions %>%
   ) %>%
   arrange(desc(total_credits))
 
-# Step 4: Use credit breakdown function
-credit_summary <- rb_credit_breakdown(bank_ids = pdx_banks$bank_id[1:10])
+# Step 4: Create detailed credit breakdown by bank
+credit_summary <- transactions$transactions %>%
+  group_by(bank_id, credit_classification, jurisdiction) %>%
+  summarize(
+    total_credits = sum(credits, na.rm = TRUE),
+    n_transactions = n(),
+    .groups = "drop"
+  ) %>%
+  arrange(bank_id, desc(total_credits))
 ```
 
 ## Workflow 4: Permittee and Permit Analysis

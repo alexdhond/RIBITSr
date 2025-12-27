@@ -39,14 +39,22 @@ library(RIBITSr)
 
 ## Quick Start: The Unified API
 
-RIBITSr provides four main functions that handle most use cases:
+> **Note:** RIBITSr now provides a streamlined `ribits()` function that automatically
+> harmonizes data from multiple sources (API, EPA ArcGIS, CSV reports). For most use
+> cases, `ribits()` is the recommended starting point. See the README for examples.
+>
+> This vignette documents the lower-level API functions (`rb_get()`, `rb_epa()`, etc.)
+> which provide more granular control when needed.
 
-| Function | Purpose |
-|----------|---------|
-| `rb_get()` | Get banks, ILF programs, umbrellas, or WQT projects |
-| `rb_epa()` | Get spatial data from EPA ArcGIS |
-| `rb_download_report()` | Download CSV reports directly (no browser needed) |
-| `rb_read()` | Read downloaded CSV files |
+RIBITSr provides the following main functions:
+
+| Function | Purpose | When to Use |
+|----------|---------|-------------|
+| `ribits()` | **Recommended** - Auto-harmonized data from all sources | Most use cases, simplest API |
+| `rb_get()` | Get banks, ILF programs, umbrellas, or WQT projects | Need API-only data or specific control |
+| `rb_epa()` | Get spatial data from EPA ArcGIS | Need EPA spatial layers only |
+| `rb_download_report()` | Download CSV reports directly (no browser needed) | Need specific CSV reports |
+| `rb_read()` | Read downloaded CSV files | Working with downloaded data |
 
 ### Exploring Available Options
 
