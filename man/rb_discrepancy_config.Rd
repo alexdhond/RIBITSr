@@ -10,7 +10,8 @@ rb_discrepancy_config(
   date_tolerance_days = 0,
   string_matching = c("exact", "ignore_case", "fuzzy"),
   flag_threshold = 5,
-  auto_resolve = TRUE
+  auto_resolve = TRUE,
+  auto_harmonize = TRUE
 )
 }
 \arguments{
@@ -39,6 +40,17 @@ Default 5 (flag differences >5\%).}
 
 \item{auto_resolve}{Automatically resolve conflicts using priority rules?
 Default TRUE. If FALSE, keeps all versions for user review.}
+
+\item{auto_harmonize}{Apply intelligent auto-harmonization rules?
+Default TRUE. When enabled, automatically fixes obvious errors like:
+\itemize{
+\item Missing values (backfill from available source)
+\item Negative values for positive fields (use positive value)
+\item Future dates for historical fields (use past date)
+\item Rounding differences <1\% (use more precise value)
+\item String normalization (whitespace, punctuation, case)
+Set to FALSE to only use priority rules without smart harmonization.
+}}
 }
 \value{
 Invisibly returns the configuration list
@@ -57,6 +69,9 @@ rb_discrepancy_config(numeric_tolerance = 0.05)  # 5\% tolerance
 
 # Don't auto-resolve - let user choose
 rb_discrepancy_config(auto_resolve = FALSE)
+
+# Disable smart harmonization (only use source priority)
+rb_discrepancy_config(auto_harmonize = FALSE)
 
 # Reset to defaults
 rb_discrepancy_config("reset")

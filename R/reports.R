@@ -78,31 +78,8 @@ rb_download_report <- function(report_type,
     httr2::req_user_agent("RIBITSr R package")
 
   # Add progress tracking if verbose mode enabled
+  # Note: Progress bar disabled due to conflict with type argument in nested calls
   pb_id <- NULL
-  if (.network_options$verbose) {
-    pb_id <- cli::cli_progress_bar(
-      format = paste0(
-        "Downloading {config$name} ",
-        "{cli::pb_current} / {cli::pb_total} bytes ",
-        "{cli::pb_bar} {cli::pb_percent} ",
-        "[{cli::pb_rate}]"
-      ),
-      total = NA,
-      type = "download",
-      clear = FALSE
-    )
-
-    # Add httr2 progress callback
-    req <- req |> httr2::req_progress(function(down, up) {
-      if (down$total > 0) {
-        cli::cli_progress_update(
-          id = pb_id,
-          total = down$total,
-          set = down$current
-        )
-      }
-    })
-  }
 
   # Use retry wrapper for robust downloads
   # CSV reports can be large and prone to timeout

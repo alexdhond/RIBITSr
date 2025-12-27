@@ -107,38 +107,47 @@
 #' Fetch data from CSV reports with standard handling
 #' @keywords internal
 #' @noRd
-.fetch_csv_data <- function(type, bank_ids, state, cache, quietly = FALSE) {
+.fetch_csv_data <- function(resource_type, bank_ids, state, cache, quietly = FALSE) {
   if (!quietly) cli::cli_progress_step("Downloading CSV reports...")
+  
+  # Ensure type is a string (defensive)
+  if (!is.character(resource_type)) {
+    cli::cli_abort("resource_type must be a character string")
+  }
   
   tryCatch({
     cache_dir <- .get_cache_dir(cache)
     
     # Determine report name based on type
-    report_name <- "banks_sites" # Default for now
+    report_name <- switch(resource_type,
+      "banks" = "banks_sites",
+      "ilf" = "ilf_programs", 
+      "umbrellas" = "umbrellas",
+      "banks_sites" # Default fallback
+    )
     
     csv_file <- rb_download_report(report_name, download_dir = cache_dir)
     banks <- rb_read(csv_file)
-    
-    # Normalize columns immediately
-    banks <- .normalize_columns(banks)
-    
-    # Filter by state (using standardized column)
-    if (!is.null(state)) {
-      if (.col_exists(banks, "state_list")) {
-        banks <- banks |> dplyr::filter(grepl(!!state, state_list, ignore.case = TRUE))
-      }
-    }
-    
-    # Ensure bank_id exists
-    banks <- .ensure_bank_id(banks, quietly = quietly)
-    
-    # Filter by bank_ids if specified
-    if (!is.null(bank_ids)) {
-      banks <- .filter_by_bank_ids(banks, bank_ids, quietly = quietly)
-    }
-    
-    banks
-  }, error = function(e) {
+        
+        # Normalize columns immediately
+        banks <- .normalize_columns(banks)
+        
+        # Filter by state (using standardized column)
+        if (!is.null(state)) {
+          if (.col_exists(banks, "state_list")) {
+            banks <- banks |> dplyr::filter(grepl(!!state, state_list, ignore.case = TRUE))
+          }
+        }
+        
+        # Ensure bank_id exists
+        banks <- .ensure_bank_id(banks, quietly = quietly)
+        
+        # Filter by bank_ids if specified
+        if (!is.null(bank_ids)) {
+          banks <- .filter_by_bank_ids(banks, bank_ids, quietly = quietly)
+        }
+        
+        banks  }, error = function(e) {
     if (!quietly) cli::cli_alert_warning("CSV fetch failed: {e$message}")
     NULL
   })
