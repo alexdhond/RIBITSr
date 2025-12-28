@@ -155,9 +155,15 @@
     num1 <- suppressWarnings(as.numeric(val1))
     num2 <- suppressWarnings(as.numeric(val2))
 
-    # Try date conversion
-    date1 <- suppressWarnings(as.Date(val1))
-    date2 <- suppressWarnings(as.Date(val2))
+    # Try date conversion using smart parser
+    date1 <- .smart_date_parse(val1)
+    date2 <- .smart_date_parse(val2)
+  } else {
+    # Set defaults when one or both values are NA
+    num1 <- NA_real_
+    num2 <- NA_real_
+    date1 <- as.Date(NA)
+    date2 <- as.Date(NA)
   }
 
   # =============================================================================
@@ -266,7 +272,55 @@
   }
 
   # =============================================================================
-  # RULE 5: Date Proximity (For dates within tolerance)
+  # RULE 5: Semantically Equivalent Dates (HIGH CONFIDENCE)
+  # =============================================================================
+  # Dates that are represented differently but parse to the same value
+  # (e.g., "05/22/2007" vs Unix timestamp 1179792000000)
+  if (!is.na(date1) && !is.na(date2) && date1 == date2) {
+    # Dates are equal - prefer human-readable format over Unix timestamp
+    # Check if either value looks like a Unix timestamp (large number or scientific notation)
+    is_timestamp1 <- grepl("^[0-9]{10,}(\\.0+)?$|^[0-9]+\\.?[0-9]*e[+-]?[0-9]+$", as.character(val1))
+    is_timestamp2 <- grepl("^[0-9]{10,}(\\.0+)?$|^[0-9]+\\.?[0-9]*e[+-]?[0-9]+$", as.character(val2))
+
+    if (is_timestamp1 && !is_timestamp2) {
+      # val2 is human-readable, val1 is timestamp
+      return(list(
+        harmonized_value = val2,
+        source = disc$source2,
+        rule = "date_format_normalization",
+        confidence = "high"
+      ))
+    } else if (is_timestamp2 && !is_timestamp1) {
+      # val1 is human-readable, val2 is timestamp
+      return(list(
+        harmonized_value = val1,
+        source = disc$source1,
+        rule = "date_format_normalization",
+        confidence = "high"
+      ))
+    } else {
+      # Both human-readable or both timestamps - use source priority
+      # Prefer ISO format (YYYY-MM-DD) if available
+      if (grepl("^[0-9]{4}-[0-9]{2}-[0-9]{2}$", val1)) {
+        return(list(
+          harmonized_value = val1,
+          source = disc$source1,
+          rule = "date_format_iso_preferred",
+          confidence = "medium"
+        ))
+      } else if (grepl("^[0-9]{4}-[0-9]{2}-[0-9]{2}$", val2)) {
+        return(list(
+          harmonized_value = val2,
+          source = disc$source2,
+          rule = "date_format_iso_preferred",
+          confidence = "medium"
+        ))
+      }
+    }
+  }
+
+  # =============================================================================
+  # RULE 6: Date Proximity (For dates within tolerance)
   # =============================================================================
   if (!is.na(date1) && !is.na(date2)) {
     diff_days <- abs(as.numeric(difftime(date1, date2, units = "days")))
@@ -286,7 +340,7 @@
   }
 
   # =============================================================================
-  # RULE 6: String Normalization (MEDIUM CONFIDENCE)
+  # RULE 7: String Normalization (MEDIUM CONFIDENCE)
   # =============================================================================
   if (is.character(val1) && is.character(val2)) {
     # Normalize both strings
@@ -333,7 +387,7 @@
   }
 
   # =============================================================================
-  # RULE 7: Source Priority (LOW CONFIDENCE)
+  # RULE 8: Source Priority (LOW CONFIDENCE)
   # =============================================================================
   # Only use as last resort - prefer CSV for official data
   if ("csv" %in% c(disc$source1, disc$source2)) {
@@ -381,4 +435,101 @@
     stringr::str_squish() |>
     stringr::str_replace_all("[[:punct:]]", "") |>
     stringr::str_replace_all("\\s+", " ")
+}
+
+
+#' Smart date parser that handles multiple formats
+#'
+#' Handles:
+#' - Unix timestamps (milliseconds or seconds)
+#' - Standard date strings (YYYY-MM-DD, MM/DD/YYYY, etc.)
+#' - Already-parsed Date objects
+#'
+#' @param x Date value in various formats
+#' @return Date object or NA if cannot parse
+#' @keywords internal
+.smart_date_parse <- function(x) {
+  # Already NA
+  if (is.na(x)) {
+    return(as.Date(NA))
+  }
+
+  # Already a Date
+  if (inherits(x, "Date")) {
+    return(x)
+  }
+
+  # Try to convert to numeric (might be Unix timestamp)
+  num_val <- suppressWarnings(as.numeric(x))
+
+  if (!is.na(num_val)) {
+    # Check if this looks like a Unix timestamp
+    # Unix timestamps are typically > 946684800 (2000-01-01 in seconds)
+    # or > 946684800000 (2000-01-01 in milliseconds)
+
+    if (num_val > 946684800000) {
+      # Milliseconds timestamp (very large number)
+      result <- tryCatch({
+        as.Date(as.POSIXct(num_val / 1000, origin = "1970-01-01", tz = "UTC"))
+      }, error = function(e) {
+        as.Date(NA)
+      })
+      if (!is.na(result)) return(result)
+    } else if (num_val > 946684800) {
+      # Seconds timestamp
+      result <- tryCatch({
+        as.Date(as.POSIXct(num_val, origin = "1970-01-01", tz = "UTC"))
+      }, error = function(e) {
+        as.Date(NA)
+      })
+      if (!is.na(result)) return(result)
+    }
+  }
+
+  # Try standard date parsing (ISO format, etc.)
+  result <- tryCatch({
+    d <- as.Date(x)
+    if (!is.na(d)) d else as.Date(NA)
+  }, error = function(e) {
+    as.Date(NA)
+  })
+  if (!is.na(result)) {
+    return(result)
+  }
+
+  # Try common US format MM/DD/YYYY
+  result <- tryCatch({
+    d <- as.Date(x, format = "%m/%d/%Y")
+    if (!is.na(d)) d else as.Date(NA)
+  }, error = function(e) {
+    as.Date(NA)
+  })
+  if (!is.na(result)) {
+    return(result)
+  }
+
+  # Try DD/MM/YYYY
+  result <- tryCatch({
+    d <- as.Date(x, format = "%d/%m/%Y")
+    if (!is.na(d)) d else as.Date(NA)
+  }, error = function(e) {
+    as.Date(NA)
+  })
+  if (!is.na(result)) {
+    return(result)
+  }
+
+  # Try MM-DD-YYYY
+  result <- tryCatch({
+    d <- as.Date(x, format = "%m-%d-%Y")
+    if (!is.na(d)) d else as.Date(NA)
+  }, error = function(e) {
+    as.Date(NA)
+  })
+  if (!is.na(result)) {
+    return(result)
+  }
+
+  # Could not parse - return NA
+  as.Date(NA)
 }
