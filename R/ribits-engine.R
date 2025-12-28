@@ -486,7 +486,7 @@
             footprints |>
               dplyr::group_by(.data$bank_id) |>
               dplyr::summarise(
-                footprint = sf::st_union(sf::st_geometry(.)),
+                footprint = sf::st_union(geometry),
                 .groups = "drop"
               ) |>
               sf::st_as_sf()
@@ -512,7 +512,7 @@
             service_areas |>
               dplyr::group_by(.data$bank_id) |>
               dplyr::summarise(
-                service_area = sf::st_union(sf::st_geometry(.)),
+                service_area = sf::st_union(geometry),
                 .groups = "drop"
               ) |>
               sf::st_as_sf()

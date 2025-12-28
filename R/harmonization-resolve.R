@@ -486,18 +486,7 @@
     }
   }
 
-  # Try standard date parsing (ISO format, etc.)
-  result <- tryCatch({
-    d <- as.Date(x)
-    if (!is.na(d)) d else as.Date(NA)
-  }, error = function(e) {
-    as.Date(NA)
-  })
-  if (!is.na(result)) {
-    return(result)
-  }
-
-  # Try common US format MM/DD/YYYY
+  # Try common US format MM/DD/YYYY first (most common in RIBITS data)
   result <- tryCatch({
     d <- as.Date(x, format = "%m/%d/%Y")
     if (!is.na(d)) d else as.Date(NA)
@@ -522,6 +511,17 @@
   # Try MM-DD-YYYY
   result <- tryCatch({
     d <- as.Date(x, format = "%m-%d-%Y")
+    if (!is.na(d)) d else as.Date(NA)
+  }, error = function(e) {
+    as.Date(NA)
+  })
+  if (!is.na(result)) {
+    return(result)
+  }
+
+  # Try standard date parsing (ISO format, etc.) - LAST, as it can guess incorrectly
+  result <- tryCatch({
+    d <- as.Date(x)
     if (!is.na(d)) d else as.Date(NA)
   }, error = function(e) {
     as.Date(NA)

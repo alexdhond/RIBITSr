@@ -29,7 +29,12 @@ COLUMN_REGISTRY <- list(
 
   bank_type = list(
     canonical = "bank_type",
-    aliases = c("kind_of_bank", "KIND_OF_BANK", "BANK_TYPE", "type", "bank_type_1", "bank_type_2")
+    aliases = c("BANK_TYPE", "bank_type_1", "bank_type_2")
+  ),
+
+  kind_of_bank = list(
+    canonical = "kind_of_bank",
+    aliases = c("KIND_OF_BANK", "bank_kind", "BANK_KIND")
   ),
 
   bank_status_date = list(
