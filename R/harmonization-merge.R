@@ -1,4 +1,4 @@
-# R/discrepancy-merge.R
+# R/harmonization-merge.R
 # Data merging utilities with column preservation
 # Split from R/discrepancy-handling.R (1,052 lines → focused modules)
 

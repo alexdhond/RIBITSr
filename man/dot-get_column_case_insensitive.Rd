@@ -20,4 +20,28 @@ Character vector of matching column names, or NA_character_ if not found
 Find a column in a dataframe regardless of case. This eliminates the need
 for repetitive \code{names(df)[tolower(names(df)) == "column_name"]} patterns.
 }
+\keyword{NOTE:}
+\keyword{R/utils-columns.R}
+\keyword{This}
+\keyword{backward}
+\keyword{been}
+\keyword{but}
+\keyword{compatibility}
+\keyword{delegates}
+\keyword{enhanced}
+\keyword{for}
+\keyword{function}
+\keyword{functionality}
+\keyword{handle}
+\keyword{has}
+\keyword{implementation.}
 \keyword{internal}
+\keyword{moved}
+\keyword{new}
+\keyword{normalization.}
+\keyword{remains}
+\keyword{stub}
+\keyword{the}
+\keyword{to}
+\keyword{underscore/dot}
+\keyword{with}

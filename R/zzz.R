@@ -56,6 +56,12 @@
     result
   }
 
+  # Check if .network_options exists (it should be defined in network-config.R)
+  # Use hardcoded defaults if not yet available (shouldn't happen in normal package loading)
+  if (!exists(".network_options", envir = parent.env(environment()))) {
+    return(invisible())
+  }
+
   # Load network configuration
   max_retries <- .get_env("RIBITS_MAX_RETRIES", .network_options$max_retries, "integer")
   retry_delay <- .get_env("RIBITS_RETRY_DELAY", .network_options$retry_delay, "numeric")

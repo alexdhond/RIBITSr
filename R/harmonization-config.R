@@ -1,4 +1,4 @@
-# R/discrepancy-config.R
+# R/harmonization-config.R
 # Configuration and priority rules for discrepancy resolution
 
 #' Configure discrepancy resolution priorities

@@ -8,3 +8,4 @@
 agents
 .gemini
 ..Rcheck/
+*.tar.gz

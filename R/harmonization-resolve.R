@@ -1,4 +1,4 @@
-# R/discrepancy-resolve.R
+# R/harmonization-resolve.R
 # Discrepancy resolution and auto-harmonization engine
 # Split from R/discrepancy-handling.R (1,052 lines → focused modules)
 

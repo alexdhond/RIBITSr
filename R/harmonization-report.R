@@ -1,4 +1,4 @@
-# R/discrepancy-report.R
+# R/harmonization-report.R
 # User-facing discrepancy reporting and export functions
 # Split from R/discrepancy-handling.R (1,052 lines → focused modules)
 

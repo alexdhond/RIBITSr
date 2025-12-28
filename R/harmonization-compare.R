@@ -1,4 +1,4 @@
-# R/discrepancy-compare.R
+# R/harmonization-compare.R
 # Discrepancy detection and comparison logic
 # Split from R/discrepancy-handling.R (1,052 lines → focused modules)
 

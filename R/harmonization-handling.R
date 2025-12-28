@@ -1,4 +1,4 @@
-# R/discrepancy-handling.R
+# R/harmonization-handling.R
 #
 # ✅ REFACTORING COMPLETE - This file has been split into focused modules:
 #
