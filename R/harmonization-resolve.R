@@ -464,19 +464,20 @@
 
   if (!is.na(num_val)) {
     # Check if this looks like a Unix timestamp
-    # Unix timestamps are typically > 946684800 (2000-01-01 in seconds)
-    # or > 946684800000 (2000-01-01 in milliseconds)
+    # Use digit count to distinguish milliseconds (13 digits) from seconds (10 digits)
+    # Millisecond timestamps: >= 100000000000 (Nov 1973) and < 10000000000000 (Nov 2286)
+    # Second timestamps: >= 100000000 (Mar 1973) and < 10000000000 (Nov 2286)
 
-    if (num_val > 946684800000) {
-      # Milliseconds timestamp (very large number)
+    if (num_val >= 100000000000 && num_val < 10000000000000) {
+      # Milliseconds timestamp (11-13 digits)
       result <- tryCatch({
         as.Date(as.POSIXct(num_val / 1000, origin = "1970-01-01", tz = "UTC"))
       }, error = function(e) {
         as.Date(NA)
       })
       if (!is.na(result)) return(result)
-    } else if (num_val > 946684800) {
-      # Seconds timestamp
+    } else if (num_val >= 100000000 && num_val < 10000000000) {
+      # Seconds timestamp (9-10 digits)
       result <- tryCatch({
         as.Date(as.POSIXct(num_val, origin = "1970-01-01", tz = "UTC"))
       }, error = function(e) {
