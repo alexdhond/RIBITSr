@@ -181,7 +181,7 @@ rb_build_name_lookup <- function(include_csv = TRUE,
 
   # Stack and deduplicate (keep first occurrence = highest priority source)
   combined <- dplyr::bind_rows(lookup_sources) |>
-    dplyr::group_by(bank_id) |>
+    dplyr::group_by(.data$bank_id) |>
     dplyr::slice_head(n = 1) |>
     dplyr::ungroup()
 

@@ -1,6 +1,6 @@
 # R/utils-globals.R
-# Global variable bindings to avoid R CMD check NOTEs
-# These variables are used in dplyr/tidyverse NSE contexts
+# Global utility functions and package imports
+# All column references now use .data pronoun for tidyverse NSE compliance
 
 #' @importFrom rlang .data
 #' @importFrom utils head data
@@ -9,60 +9,9 @@
 #' @importFrom tidyselect where
 NULL
 
-# Suppress R CMD check NOTEs about undefined global variables
-# These are column names used in dplyr operations with .data pronoun
-utils::globalVariables(c(
-  # Column names used in dplyr operations
-  "bank_id",
-  "Bank ID",
-  "name",
-  "Name",
-  "State List",
-  "name_normalized",
-  ".name_normalized",
-  "bank_id_exact",
-  "bank_id_fuzzy",
-  "fuzzy_score",
-  "transaction_id",
-  "resolved_source",
-  "source1",
-  "value1",
-  "value2",
-  "severity",
-  "resolved_value",
-  "field",
-  "count",
-  "state_list",
-  "bank_name",
-  "bank_name_lookup",
-  "bank_name_global",
-  "banks_lookup",
-  "sponsor_name",
-  "contact_type",
-  "first_name",
-  "last_name",
-  "email",
-  "phone",
-  "credits",
-  "anticipated_release_date",
-  "available_credits",
-  "released_credits",
-  "potential_credits",
-  "credit_classification",
-  "create_date",
-  "acres",
-  "transaction_type",
-  "credit_action",
-  "transaction_date",
-  "impact_huc",
-  "impact_state",
-  "permittee",
-  "geometry",
-  "footprints_data",
-  "service_areas_data",
-  "across",
-  "everything"
-))
+# NOTE: Previous globalVariables declarations (65 items) have been removed.
+# All column references in dplyr operations now use the .data pronoun instead
+# of bare column names, following tidyverse best practices for NSE.
 
 # ---- Utility Functions ----
 
@@ -195,7 +144,7 @@ utils::globalVariables(c(
 
     # Now filter by the matched bank_id
     if ("bank_id" %in% names(data)) {
-      data <- data |> dplyr::filter(bank_id %in% bank_ids)
+      data <- data |> dplyr::filter(.data$bank_id %in% bank_ids)
     }
   } else {
     if (!quietly) {
@@ -307,7 +256,7 @@ utils::globalVariables(c(
       if (!quietly) {
         cli::cli_alert_warning("{n_unmatched} rows couldn't be matched to bank IDs (removing)")
       }
-      df <- df |> dplyr::filter(!is.na(bank_id))
+      df <- df |> dplyr::filter(!is.na(.data$bank_id))
     }
   }
 
@@ -344,7 +293,7 @@ utils::globalVariables(c(
 
   # Filter to specific bank IDs if requested
   if (!is.null(bank_ids) && "bank_id" %in% names(data)) {
-    data <- data |> dplyr::filter(bank_id %in% bank_ids)
+    data <- data |> dplyr::filter(.data$bank_id %in% bank_ids)
   }
 
   data

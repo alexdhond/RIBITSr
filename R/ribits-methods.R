@@ -2,9 +2,6 @@
 # S3 methods for ribits_data objects
 # Provides print, plot, dplyr verbs, and other convenient interfaces
 
-# Declare global variables for R CMD check
-utils::globalVariables(c("confidence", "n", "resolution_rule"))
-
 #' Print method for ribits_data
 #'
 #' @param x A ribits_data object
@@ -83,8 +80,8 @@ print.ribits_data <- function(x, ...) {
       resolutions <- x$.meta$harmonization_resolutions
       if (!is.null(resolutions) && "confidence" %in% names(resolutions)) {
         by_confidence <- resolutions |>
-          dplyr::count(confidence, name = "n") |>
-          dplyr::arrange(dplyr::desc(n))
+          dplyr::count(.data$confidence, name = "n") |>
+          dplyr::arrange(dplyr::desc(.data$n))
 
         for (i in seq_len(nrow(by_confidence))) {
           conf <- by_confidence$confidence[i]
@@ -179,8 +176,8 @@ resolutions.ribits_data <- function(x, ...) {
 
   # Group by resolution rule
   by_rule <- res |>
-    dplyr::count(resolution_rule, confidence, name = "n") |>
-    dplyr::arrange(dplyr::desc(n))
+    dplyr::count(.data$resolution_rule, .data$confidence, name = "n") |>
+    dplyr::arrange(dplyr::desc(.data$n))
 
   for (i in seq_len(nrow(by_rule))) {
     rule <- by_rule$resolution_rule[i]
@@ -296,17 +293,17 @@ filter.ribits_data <- function(.data, ...) {
 
     if (!is.null(.data$transactions) && "bank_id" %in% names(.data$transactions)) {
       .data$transactions <- .data$transactions |>
-        dplyr::filter(bank_id %in% remaining_ids)
+        dplyr::filter(.data$bank_id %in% remaining_ids)
     }
 
     if (!is.null(.data$.contacts) && "bank_id" %in% names(.data$.contacts)) {
       .data$.contacts <- .data$.contacts |>
-        dplyr::filter(bank_id %in% remaining_ids)
+        dplyr::filter(.data$bank_id %in% remaining_ids)
     }
 
     if (!is.null(.data$geometry) && "bank_id" %in% names(.data$geometry)) {
       .data$geometry <- .data$geometry |>
-        dplyr::filter(bank_id %in% remaining_ids)
+        dplyr::filter(.data$bank_id %in% remaining_ids)
     }
   }
 

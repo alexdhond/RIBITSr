@@ -294,7 +294,7 @@
   }
 
   contacts |>
-    dplyr::group_by(bank_id) |>
+    dplyr::group_by(.data$bank_id) |>
     dplyr::summarise(
       # Primary sponsor
       primary_sponsor = dplyr::first(sponsor_name[contact_type == "bank_sponsors"], default = NA_character_),
@@ -352,7 +352,7 @@
   }
 
   credit_summary |>
-    dplyr::group_by(bank_id) |>
+    dplyr::group_by(.data$bank_id) |>
     dplyr::summarise(
       # Totals across all classifications
       total_available_credits = sum(available_credits, na.rm = TRUE),
@@ -415,7 +415,7 @@
   }
 
   transactions |>
-    dplyr::group_by(bank_id) |>
+    dplyr::group_by(.data$bank_id) |>
     dplyr::summarise(
       # Transaction volume
       n_transactions = dplyr::n(),
@@ -541,7 +541,7 @@
   }
 
   credit_releases |>
-    dplyr::group_by(bank_id) |>
+    dplyr::group_by(.data$bank_id) |>
     dplyr::summarise(
       # Totals
       total_anticipated_credits = sum(credits, na.rm = TRUE),
@@ -583,7 +583,7 @@
   }
 
   public_notices |>
-    dplyr::group_by(bank_id) |>
+    dplyr::group_by(.data$bank_id) |>
     dplyr::summarise(
       # Counts
       n_public_notices = dplyr::n(),

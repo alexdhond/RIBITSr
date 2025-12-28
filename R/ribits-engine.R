@@ -353,7 +353,7 @@
       fp_wide <- NULL
       if (!is.null(footprints) && nrow(footprints) > 0 && inherits(footprints, "sf")) {
           fp_wide <- footprints |>
-            dplyr::group_by(bank_id) |>
+            dplyr::group_by(.data$bank_id) |>
             dplyr::summarise(footprint = sf::st_union(geometry), .groups = "drop") |>
             sf::st_as_sf()
       }
@@ -362,7 +362,7 @@
       sa_wide <- NULL
       if (!is.null(service_areas) && nrow(service_areas) > 0 && inherits(service_areas, "sf")) {
           sa_wide <- service_areas |>
-            dplyr::group_by(bank_id) |>
+            dplyr::group_by(.data$bank_id) |>
             dplyr::summarise(service_area = sf::st_union(geometry), .groups = "drop") |>
             sf::st_as_sf()
       }
@@ -474,7 +474,7 @@
         # Names already cleaned by rb_epa_query()
         if ("bank_id" %in% names(footprints)) {
           fp_wide <- footprints |>
-            dplyr::group_by(bank_id) |>
+            dplyr::group_by(.data$bank_id) |>
             dplyr::summarise(footprint = sf::st_union(geometry), .groups = "drop") |>
             sf::st_as_sf()
         }
@@ -487,7 +487,7 @@
         # Names already cleaned by rb_epa_query()
         if ("bank_id" %in% names(service_areas)) {
           sa_wide <- service_areas |>
-            dplyr::group_by(bank_id) |>
+            dplyr::group_by(.data$bank_id) |>
             dplyr::summarise(service_area = sf::st_union(geometry), .groups = "drop") |>
             sf::st_as_sf()
         }
