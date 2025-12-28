@@ -39,7 +39,7 @@ NULL
     return(FALSE)
   }
 
-  if (case_insensitive) {
+  if (isTRUE(case_insensitive)) {
     # Use existing case-insensitive lookup
     actual_col <- .get_column_case_insensitive(df, col)
     return(!is.na(actual_col))
@@ -91,7 +91,7 @@ NULL
   }
 
   # Find actual column name
-  if (case_insensitive) {
+  if (isTRUE(case_insensitive)) {
     actual_col <- .get_column_case_insensitive(df, col)
 
     if (is.na(actual_col)) {
@@ -167,7 +167,7 @@ NULL
   }
 
   # Find actual column name if case-insensitive
-  if (case_insensitive) {
+  if (isTRUE(case_insensitive)) {
     actual_col <- .get_column_case_insensitive(df, col)
 
     if (!is.na(actual_col)) {
@@ -221,7 +221,7 @@ NULL
   }
 
   # Find actual column names
-  if (case_insensitive) {
+  if (isTRUE(case_insensitive)) {
     actual_cols <- purrr::map_chr(cols, ~.get_column_case_insensitive(df, .x))
     names(actual_cols) <- cols
 
@@ -305,7 +305,7 @@ NULL
   }
 
   # Find actual column name
-  if (case_insensitive) {
+  if (isTRUE(case_insensitive)) {
     actual_old <- .get_column_case_insensitive(df, old_name)
 
     if (is.na(actual_old)) {
@@ -373,7 +373,7 @@ NULL
     )
   }
 
-  if (case_insensitive) {
+  if (isTRUE(case_insensitive)) {
     actual_cols <- purrr::map_chr(required_cols,
                                    ~.get_column_case_insensitive(df, .x))
     missing_cols <- required_cols[is.na(actual_cols)]

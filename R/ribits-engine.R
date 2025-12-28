@@ -342,10 +342,14 @@
           }
         }
         if (length(centroids_list) > 0) {
-          centroids <- tibble::tibble(
-            bank_id = as.integer(names(centroids_list)),
-            centroid = sf::st_sfc(centroids_list, crs = 4326)
-          )
+          # Filter out NULL geometries before creating sfc
+          valid_centroids <- centroids_list[!sapply(centroids_list, is.null)]
+          if (length(valid_centroids) > 0) {
+            centroids <- tibble::tibble(
+              bank_id = as.integer(names(valid_centroids)),
+              centroid = sf::st_sfc(unname(valid_centroids), crs = 4326)
+            )
+          }
         }
       }
 
@@ -460,10 +464,14 @@
           }
         }
         if (length(centroids_list) > 0) {
-          centroids <- tibble::tibble(
-            bank_id = as.integer(names(centroids_list)),
-            centroid = sf::st_sfc(centroids_list, crs = 4326)
-          )
+          # Filter out NULL geometries before creating sfc
+          valid_centroids <- centroids_list[!sapply(centroids_list, is.null)]
+          if (length(valid_centroids) > 0) {
+            centroids <- tibble::tibble(
+              bank_id = as.integer(names(valid_centroids)),
+              centroid = sf::st_sfc(unname(valid_centroids), crs = 4326)
+            )
+          }
         }
       }
 
@@ -473,10 +481,23 @@
           inherits(footprints, "sf")) {
         # Names already cleaned by rb_epa_query()
         if ("bank_id" %in% names(footprints)) {
-          fp_wide <- footprints |>
-            dplyr::group_by(.data$bank_id) |>
-            dplyr::summarise(footprint = sf::st_union(geometry), .groups = "drop") |>
-            sf::st_as_sf()
+          # Safely extract geometry column using sf::st_geometry()
+          fp_wide <- tryCatch({
+            footprints |>
+              dplyr::group_by(.data$bank_id) |>
+              dplyr::summarise(
+                footprint = sf::st_union(sf::st_geometry(.)),
+                .groups = "drop"
+              ) |>
+              sf::st_as_sf()
+          }, error = function(e) {
+            if (!quietly) {
+              cli::cli_alert_warning(
+                "Failed to process footprints: {conditionMessage(e)}"
+              )
+            }
+            NULL
+          })
         }
       }
 
@@ -486,10 +507,23 @@
           inherits(service_areas, "sf")) {
         # Names already cleaned by rb_epa_query()
         if ("bank_id" %in% names(service_areas)) {
-          sa_wide <- service_areas |>
-            dplyr::group_by(.data$bank_id) |>
-            dplyr::summarise(service_area = sf::st_union(geometry), .groups = "drop") |>
-            sf::st_as_sf()
+          # Safely extract geometry column using sf::st_geometry()
+          sa_wide <- tryCatch({
+            service_areas |>
+              dplyr::group_by(.data$bank_id) |>
+              dplyr::summarise(
+                service_area = sf::st_union(sf::st_geometry(.)),
+                .groups = "drop"
+              ) |>
+              sf::st_as_sf()
+          }, error = function(e) {
+            if (!quietly) {
+              cli::cli_alert_warning(
+                "Failed to process service areas: {conditionMessage(e)}"
+              )
+            }
+            NULL
+          })
         }
       }
 
