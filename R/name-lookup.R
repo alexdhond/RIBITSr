@@ -287,26 +287,16 @@ rb_match_names <- function(data,
     unmatched_idx <- which(is.na(exact_matches$bank_id_exact))
 
     if (length(unmatched_idx) > 0) {
-      # Progress bar for fuzzy matching
-      pb <- cli::cli_progress_bar(
-        "Fuzzy matching {length(unmatched_idx)} names (vectorized)",
-        total = 3,  # 3 steps: filter, compute, assign
-        format = "{cli::pb_bar} {cli::pb_percent} | {cli::pb_current}/{cli::pb_total} steps"
-      )
-
-      # Step 1: Get unmatched names and filter out empty/NA
-      cli::cli_progress_update(id = pb, set = 1)
+      # Get unmatched names and filter out empty/NA
       unmatched_names <- exact_matches$.name_normalized[unmatched_idx]
       valid_mask <- !is.na(unmatched_names) & nchar(unmatched_names) > 0
       valid_idx <- unmatched_idx[valid_mask]
       valid_names <- unmatched_names[valid_mask]
 
       if (length(valid_names) > 0) {
-        # Step 2: Vectorized similarity computation (THIS IS THE MAGIC)
+        # Vectorized similarity computation
         # stringdist::stringsimmatrix computes ALL similarities at once in C code
         # Much faster than sapply loop: O(n*m) in C vs O(n*m) in R
-        cli::cli_progress_update(id = pb, set = 2)
-
         sim_matrix <- stringdist::stringsimmatrix(
           valid_names,
           lookup$name_normalized,
@@ -317,17 +307,12 @@ rb_match_names <- function(data,
         best_indices <- apply(sim_matrix, 1, which.max)
         best_scores <- apply(sim_matrix, 1, max)
 
-        # Step 3: Assign results
-        cli::cli_progress_update(id = pb, set = 3)
-
         # Apply threshold and assign matches
         matches <- ifelse(best_scores >= threshold, lookup$bank_id[best_indices], NA)
 
         exact_matches$bank_id_fuzzy[valid_idx] <- matches
         exact_matches$fuzzy_score[valid_idx] <- best_scores
       }
-
-      cli::cli_progress_done(id = pb)
 
       n_fuzzy <- sum(!is.na(exact_matches$bank_id_fuzzy))
       cli::cli_alert_success("Fuzzy matches: {n_fuzzy}")

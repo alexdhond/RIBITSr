@@ -399,18 +399,28 @@
   # Ensure bank_id is integer for consistent typing across joins
   transactions$bank_id <- as.integer(transactions$bank_id)
 
+  # Helper: safely parse dates (handles various formats)
+  safe_parse_date <- function(x) {
+    if (is.null(x) || all(is.na(x))) return(as.Date(NA))
+    if (inherits(x, "Date")) return(x)
+    parsed <- .try_parse_date(x)
+    if (!is.null(parsed)) parsed else as.Date(NA)
+  }
+
   # Helper: safely calculate months between dates
   months_diff <- function(from, to = Sys.Date()) {
     if (is.null(from) || all(is.na(from))) return(NA_real_)
-    from_date <- if (is.character(from)) as.Date(from) else as.Date(from)
+    from_date <- safe_parse_date(from)
+    if (all(is.na(from_date))) return(NA_real_)
     as.numeric(difftime(to, max(from_date, na.rm = TRUE), units = "days")) / 30.44
   }
 
   # Helper: safely calculate years between dates
   years_diff <- function(from, to) {
     if (is.null(from) || is.null(to) || all(is.na(from)) || all(is.na(to))) return(NA_real_)
-    from_date <- if (is.character(from)) as.Date(from) else as.Date(from)
-    to_date <- if (is.character(to)) as.Date(to) else as.Date(to)
+    from_date <- safe_parse_date(from)
+    to_date <- safe_parse_date(to)
+    if (all(is.na(from_date)) || all(is.na(to_date))) return(NA_real_)
     as.numeric(difftime(max(to_date, na.rm = TRUE), min(from_date, na.rm = TRUE), units = "days")) / 365.25
   }
 
@@ -456,12 +466,14 @@
 
       # Temporal patterns
       first_transaction_date = if ("transaction_date" %in% names(dplyr::cur_data())) {
-        min(transaction_date, na.rm = TRUE)
+        parsed <- safe_parse_date(transaction_date)
+        if (all(is.na(parsed))) as.Date(NA) else min(parsed, na.rm = TRUE)
       } else {
         as.Date(NA)
       },
       last_transaction_date = if ("transaction_date" %in% names(dplyr::cur_data())) {
-        max(transaction_date, na.rm = TRUE)
+        parsed <- safe_parse_date(transaction_date)
+        if (all(is.na(parsed))) as.Date(NA) else max(parsed, na.rm = TRUE)
       } else {
         as.Date(NA)
       },
@@ -614,10 +626,19 @@
     return(tibble::tibble(bank_id = integer()))
   }
 
-  # Ensure create_date exists
+  # Ensure create_date exists and is a Date type
   if (!"create_date" %in% names(public_notices)) {
     cli::cli_alert_warning("Missing 'create_date' column in public_notices")
     public_notices$create_date <- as.Date(NA)
+  } else if (!inherits(public_notices$create_date, "Date")) {
+    # Convert to Date if not already (handles character dates from CSV)
+    parsed <- .try_parse_date(public_notices$create_date)
+    if (!is.null(parsed)) {
+      public_notices$create_date <- parsed
+    } else {
+      # Fallback: set to NA if parsing fails
+      public_notices$create_date <- as.Date(NA)
+    }
   }
 
   public_notices |>
