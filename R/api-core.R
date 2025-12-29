@@ -400,11 +400,8 @@ rb_get_multiple_generic <- function(type, ids, get_fn, progress = TRUE, ...) {
     out <- list()
     
     for (comp in components) {
-      # Extract this component from all results
-      items <- lapply(results, function(x) x[[comp]])
-      
-      # Remove NULLs
-      items <- items[!sapply(items, is.null)]
+      # Extract this component from all results and remove NULLs
+      items <- purrr::map(results, comp) |> purrr::compact()
       
       if (length(items) > 0) {
         # Check if items are sf objects

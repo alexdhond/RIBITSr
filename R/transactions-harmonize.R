@@ -136,7 +136,91 @@
       )
   }
 
+  # STEP 7: Deduplicate transactions
+  unified <- .deduplicate_transactions(unified)
+
   unified
+}
+
+
+#' Deduplicate transaction records (internal)
+#'
+#' Removes duplicate transactions based on key fields. Uses a multi-step approach:
+#' 1. Exact duplicates (same bank_id, transaction_date, credits, permit_list)
+#' 2. Near-duplicates with same bank_id and credits within a small date window
+#'
+#' @param transactions A data frame of transactions
+#' @return Deduplicated transactions with duplicate count in metadata
+#' @keywords internal
+#' @noRd
+.deduplicate_transactions <- function(transactions) {
+  if (is.null(transactions) || nrow(transactions) == 0) {
+    return(transactions)
+  }
+
+  original_count <- nrow(transactions)
+
+  # Key columns for duplicate detection (use what's available)
+  key_cols <- intersect(
+    c("bank_id", "transaction_date", "credits", "permit_list", "credit_action"),
+    names(transactions)
+  )
+
+  if (length(key_cols) < 2) {
+    # Not enough key columns for meaningful deduplication
+    return(transactions)
+  }
+
+  # Step 1: Remove exact duplicates based on key columns
+  # Keep the row with the most non-NA values
+  transactions <- transactions |>
+    dplyr::mutate(.row_completeness = rowSums(!is.na(dplyr::pick(dplyr::everything())))) |>
+    dplyr::arrange(dplyr::across(dplyr::all_of(key_cols)), dplyr::desc(.row_completeness)) |>
+    dplyr::distinct(dplyr::across(dplyr::all_of(key_cols)), .keep_all = TRUE) |>
+    dplyr::select(-.row_completeness)
+
+  # Step 2: Handle near-duplicates (same bank_id/credits but slightly different dates)
+  # This catches cases where the same transaction appears with date variations
+  if ("transaction_date" %in% names(transactions) && "bank_id" %in% names(transactions)) {
+    # Parse dates if character
+    if (is.character(transactions$transaction_date)) {
+      transactions <- transactions |>
+        dplyr::mutate(
+          .parsed_date = as.Date(transaction_date, format = "%m/%d/%Y")
+        )
+    } else if (inherits(transactions$transaction_date, "Date")) {
+      transactions <- transactions |>
+        dplyr::mutate(.parsed_date = transaction_date)
+    }
+
+    if (".parsed_date" %in% names(transactions)) {
+      # Group by bank_id and credits, check for date clusters within 7 days
+      if ("credits" %in% names(transactions)) {
+        transactions <- transactions |>
+          dplyr::group_by(bank_id, credits) |>
+          dplyr::arrange(.parsed_date) |>
+          dplyr::mutate(
+            .date_diff = as.numeric(difftime(.parsed_date, dplyr::lag(.parsed_date), units = "days")),
+            .is_near_dupe = !is.na(.date_diff) & .date_diff <= 7 & .date_diff >= 0
+          ) |>
+          dplyr::filter(!.is_near_dupe) |>
+          dplyr::ungroup() |>
+          dplyr::select(-dplyr::any_of(c(".parsed_date", ".date_diff", ".is_near_dupe")))
+      } else {
+        transactions <- transactions |>
+          dplyr::select(-dplyr::any_of(".parsed_date"))
+      }
+    }
+  }
+
+  final_count <- nrow(transactions)
+  removed_count <- original_count - final_count
+
+  if (removed_count > 0) {
+    cli::cli_alert_info("Removed {removed_count} duplicate transaction{?s}")
+  }
+
+  transactions
 }
 
 

@@ -400,20 +400,20 @@ rb_clear_cache <- function(type = c("all", "csv", "lookup"), verbose = TRUE) {
 #' @keywords internal
 .standardize_state <- function(state) {
   if (is.null(state)) return(NULL)
-  
+
   # Ensure character
   state <- as.character(state)
-  
-  # Vectorized lookup
-  sapply(state, function(s) {
+
+  # Vectorized lookup using purrr
+  purrr::map_chr(state, function(s) {
     if (nchar(s) == 2) return(toupper(s)) # Already abbreviation
-    
+
     # Try exact match on name
     match_idx <- match(tolower(s), tolower(datasets::state.name))
     if (!is.na(match_idx)) {
       return(datasets::state.abb[match_idx])
     }
-    
+
     # Return original if no match (could be a valid code not in state.name)
     s
   })

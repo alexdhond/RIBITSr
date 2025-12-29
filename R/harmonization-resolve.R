@@ -459,27 +459,42 @@
     return(x)
   }
 
+  # Helper to validate date is in reasonable range (1900-2100)
+  .is_reasonable_date <- function(d) {
+    if (is.na(d)) return(FALSE)
+    year <- as.integer(format(d, "%Y"))
+    year >= 1900 && year <= 2100
+  }
+
   # Try to convert to numeric (might be Unix timestamp)
   num_val <- suppressWarnings(as.numeric(x))
 
   if (!is.na(num_val)) {
     # Check if this looks like a Unix timestamp
-    # Use digit count to distinguish milliseconds (13 digits) from seconds (10 digits)
-    # Millisecond timestamps: >= 100000000000 (Nov 1973) and < 10000000000000 (Nov 2286)
-    # Second timestamps: >= 100000000 (Mar 1973) and < 10000000000 (Nov 2286)
+    # Handle both positive (post-1970) and negative (pre-1970) timestamps
+    # Millisecond timestamps: |value| >= 100000000000 (1973 or 1967) and < 10000000000000 (2286 or before)
+    # Second timestamps: |value| >= 100000000 (1973 or 1967) and < 10000000000 (2286 or before)
+    # Avoid false positives: 4-digit numbers (years) should not be treated as timestamps
 
-    if (num_val >= 100000000000 && num_val < 10000000000000) {
-      # Milliseconds timestamp (11-13 digits)
+    abs_val <- abs(num_val)
+
+    # Milliseconds timestamp (11-13 digits absolute value)
+    if (abs_val >= 100000000000 && abs_val < 10000000000000) {
       result <- tryCatch({
-        as.Date(as.POSIXct(num_val / 1000, origin = "1970-01-01", tz = "UTC"))
+        d <- as.Date(as.POSIXct(num_val / 1000, origin = "1970-01-01", tz = "UTC"))
+        if (.is_reasonable_date(d)) d else as.Date(NA)
       }, error = function(e) {
         as.Date(NA)
       })
       if (!is.na(result)) return(result)
-    } else if (num_val >= 100000000 && num_val < 10000000000) {
-      # Seconds timestamp (9-10 digits)
+    }
+
+    # Seconds timestamp (9-10 digits absolute value)
+    # Negative values handle dates before 1970 (e.g., -315619200 = Jan 1, 1960)
+    if (abs_val >= 100000000 && abs_val < 10000000000) {
       result <- tryCatch({
-        as.Date(as.POSIXct(num_val, origin = "1970-01-01", tz = "UTC"))
+        d <- as.Date(as.POSIXct(num_val, origin = "1970-01-01", tz = "UTC"))
+        if (.is_reasonable_date(d)) d else as.Date(NA)
       }, error = function(e) {
         as.Date(NA)
       })

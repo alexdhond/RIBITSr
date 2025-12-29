@@ -172,7 +172,7 @@ rb_get <- function(type = NULL,
   # Single ID - get and extract components
   if (length(id) == 1) {
     raw <- rb_get_generic(type, id, show_params = show_params)
-    if (nrow(raw) == 0) return(list())
+    if (is.null(raw) || nrow(raw) == 0) return(list())
     
     # Extract components
     out <- list(
@@ -193,7 +193,7 @@ rb_get <- function(type = NULL,
     if (type == "umbrellas") out$umbrella_sites <- rb_extract_umbrella_sites(raw)
     
     # Remove NULL entries
-    return(out[!sapply(out, is.null)])
+    return(purrr::compact(out))
   }
   
   # Multiple IDs - use generic batch function
@@ -284,18 +284,17 @@ rb_get <- function(type = NULL,
     })
   })
   
-  if (progress) cli::cli_alert_success("Completed {sum(!sapply(results, is.null))}/{length(ids)} requests")
-  
+  if (progress) cli::cli_alert_success("Completed {sum(!purrr::map_lgl(results, is.null))}/{length(ids)} requests")
+
   # Combine results by component
-  results <- results[!sapply(results, is.null)]
+  results <- purrr::compact(results)
   if (length(results) == 0) return(list())
-  
-  components <- unique(unlist(lapply(results, names)))
+
+  components <- unique(unlist(purrr::map(results, names)))
   out <- list()
-  
+
   for (comp in components) {
-    items <- lapply(results, function(x) x[[comp]])
-    items <- items[!sapply(items, is.null)]
+    items <- purrr::map(results, comp) |> purrr::compact()
     if (length(items) > 0) {
       if (inherits(items[[1]], "sf")) {
         out[[comp]] <- do.call(rbind, items)

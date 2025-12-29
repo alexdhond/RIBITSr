@@ -128,7 +128,7 @@ rb_read <- function(path, type = NULL, validate = TRUE) {
 }
 
 #' Generic CSV Reader (internal)
-#' 
+#'
 #' Handles RIBITS CSV quirks like empty first rows and inconsistent headers.
 #' @keywords internal
 #' @noRd
@@ -136,10 +136,10 @@ rb_read <- function(path, type = NULL, validate = TRUE) {
   tryCatch({
     # Read first few lines to detect format
     first_lines <- readr::read_lines(path, n_max = 5)
-    
+
     # Check if first line is empty or just commas (RIBITS quirk)
     first_line_empty <- nchar(gsub(",", "", first_lines[1])) == 0
-    
+
     skip_rows <- 0
     if (first_line_empty && length(first_lines) > 1) {
       # Check if second line looks like headers (contains text)
@@ -147,7 +147,7 @@ rb_read <- function(path, type = NULL, validate = TRUE) {
         skip_rows <- 1
       }
     }
-    
+
     # Read CSV with appropriate skip
     data <- readr::read_csv(path, skip = skip_rows, show_col_types = FALSE)
 
@@ -159,17 +159,123 @@ rb_read <- function(path, type = NULL, validate = TRUE) {
     # Try to extract bank_id from name if not present
     if (!"bank_id" %in% names(data) && "name" %in% names(data)) {
       # Many RIBITS names contain the bank ID in parentheses at end
-      # e.g., "Some Bank Name (123)"
+      # e.g., "Some Bank Name (123)" or "Some Bank Name (123) "
+      # First try parentheses pattern, then fall back to trailing digits
       data <- data |>
         dplyr::mutate(
-          bank_id = as.integer(stringr::str_extract(.data$name, "\\d+$"))
-        )
+          # Try to extract ID from parentheses first (most reliable)
+          .id_from_parens = stringr::str_extract(.data$name, "\\(([0-9]+)\\)\\s*$"),
+          .id_from_parens = stringr::str_replace_all(.data$.id_from_parens, "[\\(\\)\\s]", ""),
+          # Fall back to trailing digits only if no parentheses match
+          .id_from_trailing = dplyr::if_else(
+            is.na(.data$.id_from_parens),
+            stringr::str_extract(.data$name, "[0-9]+$"),
+            NA_character_
+          ),
+          bank_id = as.integer(dplyr::coalesce(.data$.id_from_parens, .data$.id_from_trailing))
+        ) |>
+        dplyr::select(-dplyr::any_of(c(".id_from_parens", ".id_from_trailing")))
     }
+
+    # Auto-parse date columns
+    data <- .auto_parse_date_columns(data)
 
     data
   }, error = function(e) {
     rlang::abort(paste("Failed to parse CSV:", e$message))
   })
+}
+
+
+#' Auto-parse date columns (internal)
+#'
+#' Detects and converts character columns that contain dates in common RIBITS formats.
+#' Supports MM/DD/YYYY format commonly used in RIBITS CSV exports.
+#'
+#' @param data A data frame
+#' @return The data frame with date columns converted to Date class
+#' @keywords internal
+#' @noRd
+.auto_parse_date_columns <- function(data) {
+  if (is.null(data) || nrow(data) == 0) {
+    return(data)
+  }
+
+
+  # Columns likely to contain dates based on name patterns
+
+date_col_patterns <- c(
+    "date", "established", "created", "modified", "updated",
+    "release", "approval", "effective", "expiration"
+  )
+
+  for (col in names(data)) {
+    # Skip if already Date or not character
+    if (!is.character(data[[col]])) next
+
+    # Check if column name suggests it's a date
+    col_lower <- tolower(col)
+    is_date_col <- any(sapply(date_col_patterns, function(p) grepl(p, col_lower)))
+
+    if (is_date_col) {
+      # Try to parse as date
+      parsed <- .try_parse_date(data[[col]])
+      if (!is.null(parsed)) {
+        data[[col]] <- parsed
+      }
+    }
+  }
+
+  data
+}
+
+
+#' Try to parse a character vector as dates (internal)
+#'
+#' Attempts multiple date formats commonly found in RIBITS data.
+#'
+#' @param x Character vector to parse
+#' @return Date vector if successful, NULL if parsing fails
+#' @keywords internal
+#' @noRd
+.try_parse_date <- function(x) {
+  if (all(is.na(x))) return(as.Date(x))
+
+  # Get non-NA sample for format detection
+  sample_vals <- x[!is.na(x)][1:min(10, sum(!is.na(x)))]
+  if (length(sample_vals) == 0) return(NULL)
+
+  # Common RIBITS date formats to try
+  formats <- c(
+    "%m/%d/%Y",    # 12/31/2024 (most common in RIBITS CSVs)
+    "%Y-%m-%d",    # 2024-12-31 (ISO format)
+    "%m-%d-%Y",    # 12-31-2024
+    "%d/%m/%Y",    # 31/12/2024
+    "%Y/%m/%d"     # 2024/12/31
+  )
+
+  for (fmt in formats) {
+    parsed <- suppressWarnings(as.Date(x, format = fmt))
+
+    # Check if parsing was successful (most values parsed)
+    success_rate <- sum(!is.na(parsed)) / sum(!is.na(x))
+
+    if (success_rate > 0.9) {
+      # Validate parsed dates are reasonable (between 1980 and 2050)
+      valid_dates <- parsed[!is.na(parsed)]
+      if (length(valid_dates) > 0) {
+        min_date <- min(valid_dates)
+        max_date <- max(valid_dates)
+
+        if (min_date >= as.Date("1980-01-01") && max_date <= as.Date("2050-12-31")) {
+          return(parsed)
+        }
+      }
+    }
+  }
+
+  # Parsing failed - return NULL to keep original
+  NULL
 }
 
 #' Read Potential Credits (internal)

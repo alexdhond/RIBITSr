@@ -316,56 +316,9 @@ COLUMN_REGISTRY <- list(
 }
 
 
-#' Get column value (consolidated helper)
-#'
-#' @description
-#' High-level helper that combines case-insensitive column lookup with safe extraction.
-#' Consolidates the common pattern of `.get_column_case_insensitive()` + value extraction.
-#'
-#' @param df A dataframe
-#' @param col_name Column name (canonical or alias, case-insensitive)
-#' @param default Default value if column doesn't exist
-#'
-#' @return Column values, or default if not found
-#'
-#' @keywords internal
-#' @noRd
-.col_get <- function(df, col_name, default = NULL) {
-  if (is.null(df) || !is.data.frame(df) || nrow(df) == 0) {
-    return(default)
-  }
-
-  # Try case-insensitive match
-  matches <- names(df)[tolower(names(df)) == tolower(col_name)]
-
-  if (length(matches) == 0) {
-    return(default)
-  }
-
-  df[[matches[1]]]
-}
-
-
-#' Check if column exists (consolidated helper)
-#'
-#' @description
-#' High-level helper for checking column existence with case-insensitive matching.
-#'
-#' @param df A dataframe
-#' @param col_name Column name (case-insensitive)
-#'
-#' @return Logical - TRUE if column exists
-#'
-#' @keywords internal
-#' @noRd
-.col_exists <- function(df, col_name) {
-  if (is.null(df) || !is.data.frame(df)) {
-    return(FALSE)
-  }
-
-  any(tolower(names(df)) == tolower(col_name))
-}
-
+# NOTE: .col_get() and .col_exists() are defined in utils-columns.R
+# They provide case-insensitive column access with additional options.
+# Do not duplicate definitions here.
 
 #' Ensure column exists (consolidated helper)
 #'

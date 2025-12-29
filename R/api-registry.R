@@ -79,7 +79,7 @@ rb_validate_list_params <- function(type, params) {
   config <- rb_get_endpoint_config(type)
 
   # Remove NULL parameters
-  params <- params[!sapply(params, is.null)]
+  params <- purrr::compact(params)
 
   # Get parameter names
   param_names <- names(params)

@@ -198,7 +198,7 @@
   # 3. Missing footprints from API
   ribits_footprints <- NULL
   if (use_api) {
-    epa_fp_ids <- if (!is.null(epa_footprints)) .col_get(epa_footprints, "bank_id", integer()) else integer()
+    epa_fp_ids <- if (!is.null(epa_footprints)) .col_get(epa_footprints, "bank_id", error_if_missing = FALSE, default = integer()) else integer()
     missing_fp_ids <- setdiff(query_ids, epa_fp_ids)
     
     if (length(missing_fp_ids) > 0 && length(missing_fp_ids) <= 30) {
@@ -228,7 +228,7 @@
   # 4. Missing service areas from API
   ribits_service_areas <- NULL
   if (use_api) {
-    epa_sa_ids <- if (!is.null(epa_service_areas)) .col_get(epa_service_areas, "bank_id", integer()) else integer()
+    epa_sa_ids <- if (!is.null(epa_service_areas)) .col_get(epa_service_areas, "bank_id", error_if_missing = FALSE, default = integer()) else integer()
     missing_sa_ids <- setdiff(query_ids, epa_sa_ids)
     
     if (length(missing_sa_ids) > 0 && length(missing_sa_ids) <= 30) {
@@ -538,23 +538,61 @@
   if (!"anticipated_release_date" %in% names(credit_releases)) {
     cli::cli_alert_warning("Missing 'anticipated_release_date' column in credit_releases")
     credit_releases$anticipated_release_date <- as.Date(NA)
+  } else {
+    # Parse date column if it's character (MM/DD/YYYY format from CSV)
+    if (is.character(credit_releases$anticipated_release_date)) {
+      credit_releases$anticipated_release_date <- as.Date(
+        credit_releases$anticipated_release_date,
+        format = "%m/%d/%Y"
+      )
+    }
   }
 
+  # Check for stale data and warn user
+  today <- Sys.Date()
+  total_releases <- nrow(credit_releases)
+  stale_releases <- sum(credit_releases$anticipated_release_date < today, na.rm = TRUE)
+  stale_pct <- round(100 * stale_releases / total_releases, 0)
+
+  if (stale_pct > 50) {
+    cli::cli_alert_warning(
+      "Credit releases data is stale: {stale_pct}% of dates have passed ({stale_releases}/{total_releases})"
+    )
+  }
+
+  # Summarize with both all releases and future-only metrics
   credit_releases |>
     dplyr::group_by(.data$bank_id) |>
     dplyr::summarise(
-      # Totals
+      # All releases (including past - for historical context)
       total_anticipated_credits = sum(credits, na.rm = TRUE),
-      n_upcoming_releases = dplyr::n(),
+      n_total_releases = dplyr::n(),
 
-      # Timeline
-      earliest_release_date = min(anticipated_release_date, na.rm = TRUE),
+      # Future releases only (truly upcoming)
+      n_future_releases = sum(anticipated_release_date >= today, na.rm = TRUE),
+      future_anticipated_credits = sum(
+        credits[anticipated_release_date >= today],
+        na.rm = TRUE
+      ),
+
+      # Timeline for future releases
+      next_release_date = {
+        future_dates <- anticipated_release_date[anticipated_release_date >= today]
+        if (length(future_dates[!is.na(future_dates)]) > 0) {
+          min(future_dates, na.rm = TRUE)
+        } else {
+          as.Date(NA)
+        }
+      },
       latest_release_date = max(anticipated_release_date, na.rm = TRUE),
 
-      # Near-term (next year)
+      # Near-term (next year) - only future releases
       credits_releasing_next_year = {
-        next_year <- Sys.Date() + 365
-        sum(credits[anticipated_release_date <= next_year], na.rm = TRUE)
+        next_year <- today + 365
+        sum(
+          credits[anticipated_release_date >= today & anticipated_release_date <= next_year],
+          na.rm = TRUE
+        )
       },
 
       .groups = "drop"

@@ -88,7 +88,7 @@ ca_data$service_areas  # Service area polygons
      "umbrella_mbi", "Umbrella instruments", "1 row/umbrella", 'rb_get("umbrella_mbi")'
    )
    
-   for (i in 1:nrow(api_endpoints)) {
+   for (i in seq_len(nrow(api_endpoints))) {
      ep <- api_endpoints[i, ]
      cli::cli_alert_success("{.strong {ep$endpoint}}: {ep$description}")
      cli::cli_text("   Grain: {ep$grain}")
@@ -129,7 +129,7 @@ ca_data$service_areas  # Service area polygons
      "service_areas", "Service area polygons", "Polygon", 'rb_epa("service_areas", state = "CA")'
    )
    
-   for (i in 1:nrow(epa_layers)) {
+   for (i in seq_len(nrow(epa_layers))) {
      ly <- epa_layers[i, ]
      cli::cli_alert_success("{.strong {ly$layer}}: {ly$description}")
      cli::cli_text("   Geometry: {ly$geometry}")
@@ -355,7 +355,7 @@ rb_columns <- function(source, state = "OR") {
   cli::cli_h2("Columns in '{source}'")
   cli::cli_alert_info("{nrow(result)} columns:")
   
-  for (i in 1:nrow(result)) {
+  for (i in seq_len(nrow(result))) {
     cli::cli_li("{.field {result$column[i]}} [{result$type[i]}]")
   }
   

@@ -193,7 +193,7 @@ rb_spatial_availability <- function(bank_ids = NULL, state = NULL, quietly = FAL
   banks <- rb_epa_query("approved_banks", where = where, bank_ids = bank_ids,
                          out_fields = "BANK_ID", return_geometry = FALSE)
   
-  if (nrow(banks) == 0) {
+  if (is.null(banks) || nrow(banks) == 0) {
     if (!quietly) cli::cli_alert_warning("No banks found")
     return(tibble::tibble(
       bank_id = integer(),

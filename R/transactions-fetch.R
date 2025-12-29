@@ -68,7 +68,7 @@ rb_transactions <- function(bank_ids = NULL,
   if (is.null(bank_ids)) {
     cli::cli_progress_step("Getting bank list...")
     banks <- rb_get("banks", state = state, district = district)
-    bank_ids <- .col_get(banks, "bank_id", default = integer())
+    bank_ids <- .col_get(banks, "bank_id", error_if_missing = FALSE, default = integer())
     cli::cli_alert_info("Found {length(bank_ids)} banks")
   }
 
@@ -77,18 +77,11 @@ rb_transactions <- function(bank_ids = NULL,
     return(result)
   }
 
-  # Overall progress bar for the 3 data sources
-  pb_sources <- cli::cli_progress_bar(
-    "Fetching transaction sources",
-    total = 3,
-    format = "{cli::pb_bar} {cli::pb_percent} | {cli::pb_current}/{cli::pb_total} sources complete"
-  )
-
   # ===================================================================
   # Source 1: Transactions by Watershed CSV (FOUNDATION - 71 columns!)
   # ===================================================================
   watershed_txns <- NULL
-  cli::cli_progress_step("Downloading transactions by watershed CSV (foundation)...")
+  cli::cli_alert_info("Downloading transactions by watershed CSV (foundation)...")
 
   watershed_txns <- tryCatch({
     csv_file <- rb_download_report("transactions_watershed", download_dir = cache_dir)
@@ -111,13 +104,13 @@ rb_transactions <- function(bank_ids = NULL,
   if (!is.null(watershed_txns) && nrow(watershed_txns) > 0) {
     cli::cli_alert_success("Watershed CSV: {nrow(watershed_txns)} transactions ({ncol(watershed_txns)} columns)")
   }
-  cli::cli_progress_update(id = pb_sources, inc = 1)
 
   # ===================================================================
   # Source 2: API Ledger (GAP-FILLING - adds transaction_id, real-time data)
   # ===================================================================
+
   api_ledger <- NULL
-  cli::cli_progress_step("Fetching API ledger for gap-filling...")
+  cli::cli_alert_info("Fetching API ledger for gap-filling...")
 
   api_ledger <- tryCatch({
     # Use bulk ledger extraction
@@ -133,13 +126,12 @@ rb_transactions <- function(bank_ids = NULL,
     api_ledger$source <- "api"
     cli::cli_alert_success("API Ledger: {nrow(api_ledger)} transactions ({ncol(api_ledger)} columns)")
   }
-  cli::cli_progress_update(id = pb_sources, inc = 1)
 
   # ===================================================================
   # Source 3: CSV Ledger Transactions (ADDITIONAL FIELDS - sub_ledger_id, permit_auth_date)
   # ===================================================================
   csv_ledger <- NULL
-  cli::cli_progress_step("Downloading CSV ledger for additional fields...")
+  cli::cli_alert_info("Downloading CSV ledger for additional fields...")
 
   csv_ledger <- tryCatch({
     csv_file <- rb_download_report("ledger_transactions", download_dir = cache_dir)
@@ -162,14 +154,11 @@ rb_transactions <- function(bank_ids = NULL,
   if (!is.null(csv_ledger) && nrow(csv_ledger) > 0) {
     cli::cli_alert_success("CSV Ledger: {nrow(csv_ledger)} transactions ({ncol(csv_ledger)} columns)")
   }
-  cli::cli_progress_update(id = pb_sources, inc = 1)
-
-  cli::cli_progress_done(id = pb_sources)
 
   # ===================================================================
   # THREE-WAY MERGE: watershed (foundation) + API (gap-fill) + CSV ledger (extras)
   # ===================================================================
-  cli::cli_progress_step("Harmonizing transactions (3-way merge)...")
+  cli::cli_alert_info("Harmonizing transactions (3-way merge)...")
 
   transactions <- .harmonize_transactions_threeway(
     watershed_txns,

@@ -240,7 +240,7 @@ rb_match_names <- function(data,
     lookup <- rb_build_name_lookup()
   }
   
-  if (nrow(lookup) == 0) {
+  if (is.null(lookup) || nrow(lookup) == 0) {
     cli::cli_alert_warning("Empty lookup table - cannot match names")
     return(data)
   }

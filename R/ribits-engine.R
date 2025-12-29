@@ -190,7 +190,7 @@
   }
 
   # Get bank IDs for subsequent queries
-  query_ids <- if (!is.null(result$banks)) .col_get(result$banks, "bank_id") else NULL
+  query_ids <- if (!is.null(result$banks)) .col_get(result$banks, "bank_id", error_if_missing = FALSE) else NULL
 
   if (is.null(query_ids) || length(query_ids) == 0) {
     if (!quietly) cli::cli_alert_warning("No valid bank IDs found after merge")
@@ -325,33 +325,8 @@
         dplyr::select(dplyr::any_of(c("bank_id", "bank_name", "bank_status"))) |>
         dplyr::distinct()
 
-      # 1. Centroids
-      centroids <- NULL
-      if (.col_exists(result$banks, "bank_location_centroid")) {
-        centroids_list <- list()
-        for (i in seq_len(nrow(result$banks))) {
-          centroid_json <- result$banks$bank_location_centroid[i]
-          bid <- result$banks$bank_id[i]
-          if (!is.na(centroid_json) && nchar(centroid_json) > 10) {
-            tryCatch({
-              pt <- sf::st_read(centroid_json, quiet = TRUE, drivers = "GeoJSON")
-              if (nrow(pt) > 0) {
-                centroids_list[[as.character(bid)]] <- sf::st_geometry(pt)[[1]]
-              }
-            }, error = function(e) NULL)
-          }
-        }
-        if (length(centroids_list) > 0) {
-          # Filter out NULL geometries before creating sfc
-          valid_centroids <- centroids_list[!sapply(centroids_list, is.null)]
-          if (length(valid_centroids) > 0) {
-            centroids <- tibble::tibble(
-              bank_id = as.integer(names(valid_centroids)),
-              centroid = sf::st_sfc(unname(valid_centroids), crs = 4326)
-            )
-          }
-        }
-      }
+      # 1. Centroids (vectorized parsing)
+      centroids <- .parse_geojson_centroids(result$banks)
 
       # 2. Footprints
       fp_wide <- NULL
@@ -377,7 +352,7 @@
       if (!is.null(centroids)) {
         geom_wide <- dplyr::left_join(geom_wide, centroids, by = "bank_id")
       } else {
-        geom_wide$centroid <- sf::st_sfc(lapply(seq_len(nrow(geom_wide)), function(x) sf::st_point()), crs = 4326)
+        geom_wide$centroid <- sf::st_sfc(purrr::map(seq_len(nrow(geom_wide)), ~ sf::st_point()), crs = 4326)
       }
 
       if (!is.null(fp_wide)) {
@@ -385,7 +360,7 @@
         df_fp$footprint <- sf::st_geometry(fp_wide)
         geom_wide <- dplyr::left_join(geom_wide, df_fp, by = "bank_id")
       } else {
-         geom_wide$footprint <- sf::st_sfc(lapply(seq_len(nrow(geom_wide)), function(x) sf::st_polygon()), crs = 4326)
+        geom_wide$footprint <- sf::st_sfc(purrr::map(seq_len(nrow(geom_wide)), ~ sf::st_polygon()), crs = 4326)
       }
 
       if (!is.null(sa_wide)) {
@@ -393,7 +368,7 @@
         df_sa$service_area <- sf::st_geometry(sa_wide)
         geom_wide <- dplyr::left_join(geom_wide, df_sa, by = "bank_id")
       } else {
-         geom_wide$service_area <- sf::st_sfc(lapply(seq_len(nrow(geom_wide)), function(x) sf::st_polygon()), crs = 4326)
+        geom_wide$service_area <- sf::st_sfc(purrr::map(seq_len(nrow(geom_wide)), ~ sf::st_polygon()), crs = 4326)
       }
 
       result$geometry <- sf::st_as_sf(geom_wide, sf_column_name = "centroid")
@@ -447,33 +422,8 @@
         dplyr::select(dplyr::any_of(c("bank_id", "bank_name", "bank_status"))) |>
         dplyr::distinct()
 
-      # 1. Extract centroids from bank_location_centroid (GeoJSON strings)
-      centroids <- NULL
-      if ("bank_location_centroid" %in% names(result$banks)) {
-        centroids_list <- list()
-        for (i in seq_len(nrow(result$banks))) {
-          centroid_json <- result$banks$bank_location_centroid[i]
-          bid <- result$banks$bank_id[i]
-          if (!is.na(centroid_json) && nchar(centroid_json) > 10) {
-            tryCatch({
-              pt <- sf::st_read(centroid_json, quiet = TRUE, drivers = "GeoJSON")
-              if (nrow(pt) > 0) {
-                centroids_list[[as.character(bid)]] <- sf::st_geometry(pt)[[1]]
-              }
-            }, error = function(e) NULL)
-          }
-        }
-        if (length(centroids_list) > 0) {
-          # Filter out NULL geometries before creating sfc
-          valid_centroids <- centroids_list[!sapply(centroids_list, is.null)]
-          if (length(valid_centroids) > 0) {
-            centroids <- tibble::tibble(
-              bank_id = as.integer(names(valid_centroids)),
-              centroid = sf::st_sfc(unname(valid_centroids), crs = 4326)
-            )
-          }
-        }
-      }
+      # 1. Extract centroids from bank_location_centroid (vectorized parsing)
+      centroids <- .parse_geojson_centroids(result$banks)
 
       # 2. Extract footprints (one per bank_id)
       fp_wide <- NULL
@@ -535,8 +485,7 @@
         if (!is.null(centroids)) {
           geom_wide <- dplyr::left_join(geom_wide, centroids, by = "bank_id")
         } else {
-          geom_wide$centroid <- sf::st_sfc(lapply(seq_len(nrow(geom_wide)),
-                                                   function(x) sf::st_point()), crs = 4326)
+          geom_wide$centroid <- sf::st_sfc(purrr::map(seq_len(nrow(geom_wide)), ~ sf::st_point()), crs = 4326)
         }
 
         # Add footprints
@@ -545,8 +494,7 @@
           fp_df$footprint <- sf::st_geometry(fp_wide)
           geom_wide <- dplyr::left_join(geom_wide, fp_df, by = "bank_id")
         } else {
-          geom_wide$footprint <- sf::st_sfc(lapply(seq_len(nrow(geom_wide)),
-                                                    function(x) sf::st_polygon()), crs = 4326)
+          geom_wide$footprint <- sf::st_sfc(purrr::map(seq_len(nrow(geom_wide)), ~ sf::st_polygon()), crs = 4326)
         }
 
         # Add service areas
@@ -555,8 +503,7 @@
           sa_df$service_area <- sf::st_geometry(sa_wide)
           geom_wide <- dplyr::left_join(geom_wide, sa_df, by = "bank_id")
         } else {
-          geom_wide$service_area <- sf::st_sfc(lapply(seq_len(nrow(geom_wide)),
-                                                       function(x) sf::st_polygon()), crs = 4326)
+          geom_wide$service_area <- sf::st_sfc(purrr::map(seq_len(nrow(geom_wide)), ~ sf::st_polygon()), crs = 4326)
         }
 
         # Convert to sf with centroid as active geometry (can switch as needed)
@@ -614,4 +561,61 @@
   }
 
   result
+}
+
+
+# =============================================================================
+# Helper Functions
+# =============================================================================
+
+#' Parse GeoJSON centroids from bank data (vectorized)
+#'
+#' Converts GeoJSON strings in bank_location_centroid column to sf geometries.
+#' Uses purrr for vectorized parsing instead of row-by-row loops.
+#'
+#' @param banks Data frame with bank_id and bank_location_centroid columns
+#' @return Tibble with bank_id and centroid geometry, or NULL if no valid centroids
+#' @keywords internal
+#' @noRd
+.parse_geojson_centroids <- function(banks) {
+  if (is.null(banks) || nrow(banks) == 0) {
+    return(NULL)
+  }
+
+  # Check for required columns
+  if (!"bank_location_centroid" %in% names(banks) || !"bank_id" %in% names(banks)) {
+    return(NULL)
+  }
+
+  # Parse each GeoJSON string to geometry using purrr::map2
+  parsed <- purrr::map2(
+    banks$bank_location_centroid,
+    banks$bank_id,
+    function(geojson, bid) {
+      if (is.na(geojson) || nchar(geojson) <= 10) {
+        return(NULL)
+      }
+      tryCatch({
+        pt <- sf::st_read(geojson, quiet = TRUE, drivers = "GeoJSON")
+        if (nrow(pt) > 0) {
+          list(bank_id = bid, geom = sf::st_geometry(pt)[[1]])
+        } else {
+          NULL
+        }
+      }, error = function(e) NULL)
+    }
+  )
+
+  # Filter out NULLs and build result
+
+  valid <- purrr::compact(parsed)
+
+  if (length(valid) == 0) {
+    return(NULL)
+  }
+
+  tibble::tibble(
+    bank_id = purrr::map_int(valid, "bank_id"),
+    centroid = sf::st_sfc(purrr::map(valid, "geom"), crs = 4326)
+  )
 }
