@@ -350,8 +350,98 @@ VALID_BANK_TYPES <- c("banks", "ilf", "umbrellas", "wqt")
 
 #' Valid bank statuses
 #'
+#' All known bank statuses from RIBITS data sources.
+#'
 #' @keywords internal
-VALID_BANK_STATUSES <- c("Active", "Inactive", "Pending", "Suspended")
+VALID_BANK_STATUSES <- c("Approved", "Pending", "Sold-Out", "Suspended", "Terminated", "Withdrawn")
+
+#' EPA layer mapping for bank statuses
+#'
+#' Maps each bank status to its corresponding EPA ArcGIS layer.
+#' Note: The "terminated_banks" layer contains multiple statuses.
+#'
+#' @keywords internal
+BANK_STATUS_EPA_LAYERS <- list(
+  Approved = "approved_banks",
+  Pending = "pending_banks",
+ `Sold-Out` = "terminated_banks",
+  Suspended = "terminated_banks",
+  Terminated = "terminated_banks",
+  Withdrawn = "terminated_banks"
+)
+
+#' Expected field availability by bank status
+#'
+#' Documents which fields are typically populated for each bank status.
+#' Used for data quality validation and user guidance.
+#'
+#' @format List keyed by status with expected field availability:
+#' \describe{
+#'   \item{has_establishment_date}{Whether YEAR_ESTABLISHED is typically populated}
+#'   \item{has_ledger}{Whether transaction ledger data is typically available}
+#'   \item{has_credits}{Whether credit information is typically available}
+#'   \item{has_footprint}{Approximate percentage with footprint geometry}
+#'   \item{has_service_area}{Approximate percentage with service area geometry}
+#'   \item{has_transactions}{Whether transaction history is typically available}
+#' }
+#'
+#' @keywords internal
+BANK_STATUS_FIELD_EXPECTATIONS <- list(
+  Approved = list(
+    has_establishment_date = TRUE,
+    has_ledger = TRUE,
+    has_credits = TRUE,
+    has_footprint = 0.60,
+    has_service_area = 0.94,
+    has_transactions = TRUE,
+    description = "Active banks with full data available"
+  ),
+  Pending = list(
+    has_establishment_date = FALSE,  # Not yet approved
+    has_ledger = FALSE,              # Not yet operating
+    has_credits = FALSE,             # No credits released
+    has_footprint = 0.25,
+    has_service_area = 0.28,
+    has_transactions = FALSE,
+    description = "Banks awaiting approval - limited data expected"
+  ),
+  `Sold-Out` = list(
+    has_establishment_date = TRUE,
+    has_ledger = FALSE,              # Historical only
+    has_credits = FALSE,             # All credits sold
+    has_footprint = 0.40,
+    has_service_area = 0.65,
+    has_transactions = TRUE,         # Historical transactions exist
+    description = "Banks with all credits sold - historical data available"
+  ),
+  Suspended = list(
+    has_establishment_date = TRUE,
+    has_ledger = TRUE,               # May still have active transactions
+    has_credits = TRUE,
+    has_footprint = 0.40,
+    has_service_area = 0.65,
+    has_transactions = TRUE,
+    description = "Temporarily suspended banks - data may be stale"
+  ),
+  Terminated = list(
+    has_establishment_date = TRUE,
+    has_ledger = FALSE,
+    has_credits = FALSE,
+    has_footprint = 0.40,
+    has_service_area = 0.65,
+    has_transactions = FALSE,
+    description = "Permanently terminated banks - historical data only"
+  ),
+  Withdrawn = list(
+    has_establishment_date = FALSE,  # May never have been fully approved
+    has_ledger = FALSE,
+    has_credits = FALSE,
+    has_footprint = 0.40,
+    has_service_area = 0.65,
+    has_transactions = FALSE,
+    description = "Withdrawn applications - minimal data expected"
+  )
+)
 
 #' Valid transaction types
 #'

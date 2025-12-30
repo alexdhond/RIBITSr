@@ -5,12 +5,12 @@
 \alias{VALID_BANK_STATUSES}
 \title{Valid bank statuses}
 \format{
-An object of class \code{character} of length 4.
+An object of class \code{character} of length 6.
 }
 \usage{
 VALID_BANK_STATUSES
 }
 \description{
-Valid bank statuses
+All known bank statuses from RIBITS data sources.
 }
 \keyword{internal}

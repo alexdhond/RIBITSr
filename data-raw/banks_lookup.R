@@ -5,11 +5,16 @@
 # Load package functions from development
 devtools::load_all()
 
-# Build lookup from live sources (EPA + API + CSV)
-# This will take ~10-30 seconds depending on API response times
+# Build comprehensive lookup from all sources (EPA + API + 5 CSV sources)
+# This will take ~30-60 seconds depending on API response times
 cli::cli_h1("Generating bundled bank lookup data")
 
-banks_lookup <- rb_build_name_lookup(include_csv = TRUE, cache = FALSE)
+banks_lookup <- rb_build_name_lookup(
+  include_csv = TRUE,
+  comprehensive = TRUE,
+  track_aliases = TRUE,
+  force_refresh = TRUE
+)
 
 # Add metadata about when this was generated
 attr(banks_lookup, "generated_date") <- Sys.Date()
@@ -19,12 +24,34 @@ attr(banks_lookup, "n_banks") <- nrow(banks_lookup)
 cli::cli_alert_success("Generated lookup with {nrow(banks_lookup)} banks")
 cli::cli_alert_info("Generated on: {Sys.Date()}")
 
-# Count by source
-source_counts <- table(banks_lookup$source)
-cli::cli_h2("Breakdown by source")
-for (src in names(source_counts)) {
-  cli::cli_alert_info("{src}: {source_counts[src]} banks")
+# Show sources used
+sources_used <- attr(banks_lookup, "sources_used")
+cli::cli_h2("Sources used")
+for (src in sources_used) {
+  cli::cli_alert_info("- {src}")
 }
+
+# Confidence score distribution
+cli::cli_h2("Confidence score distribution")
+score_summary <- summary(banks_lookup$confidence_score)
+cli::cli_alert_info("Min: {round(score_summary['Min.'], 2)}")
+cli::cli_alert_info("Median: {round(score_summary['Median'], 2)}")
+cli::cli_alert_info("Mean: {round(score_summary['Mean'], 2)}")
+cli::cli_alert_info("Max: {round(score_summary['Max.'], 2)}")
+
+# Source count distribution
+cli::cli_h2("Source coverage")
+source_count_dist <- table(banks_lookup$source_count)
+for (n in names(source_count_dist)) {
+  cli::cli_alert_info("{n} source(s): {source_count_dist[n]} banks")
+}
+
+# Banks with/without bank_id
+n_with_id <- sum(!is.na(banks_lookup$bank_id))
+n_without_id <- sum(is.na(banks_lookup$bank_id))
+cli::cli_h2("Bank ID coverage")
+cli::cli_alert_info("With bank_id: {n_with_id} ({round(n_with_id/nrow(banks_lookup)*100, 1)}%)")
+cli::cli_alert_info("Without bank_id: {n_without_id} ({round(n_without_id/nrow(banks_lookup)*100, 1)}%)")
 
 # Save as internal package data (will be available as banks_lookup)
 usethis::use_data(banks_lookup, overwrite = TRUE)

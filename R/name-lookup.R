@@ -1,37 +1,77 @@
 # R/name-lookup.R
 # Name-to-ID lookup functions for harmonizing CSV data with API/EPA
 
+# Source priority weights for confidence scoring (higher = more reliable)
+LOOKUP_SOURCE_WEIGHTS <- c(
+  epa = 1.0,
+  api = 0.9,
+  csv_watershed = 0.8,
+  csv_banks_sites = 0.7,
+  csv_credit_class = 0.6,
+  csv_ledger = 0.5,
+  csv_notices = 0.4
+)
+
 #' Build a name-to-ID lookup table
 #'
 #' Creates a lookup table mapping bank/program names to their IDs using
-#' data from EPA ArcGIS and the RIBITS API. This function implements a
-#' smart caching strategy to minimize API calls:
+#' data from EPA ArcGIS, RIBITS API, and multiple CSV sources. This function
+#' implements a smart caching strategy to minimize API calls:
 #'
 #' 1. Checks persistent user cache first (default: 30 day refresh)
 #' 2. If cache is stale/missing, fetches fresh data from APIs
 #' 3. Falls back to bundled package data if APIs are unavailable
 #'
-#' @param include_csv Logical. Also include mappings from transactions_watershed CSV
-#'   when fetching fresh data. Default TRUE.
+#' @param include_csv Logical. Include mappings from CSV sources when fetching
+#'   fresh data. Default TRUE.
+#' @param comprehensive Logical. When TRUE (default), fetches from all available
+#'   CSV sources (banks_sites, credit_classification, ledger_transactions,
+#'   public_notices) in addition to EPA, API, and transactions_watershed.
+#'   When FALSE, only uses EPA, API, and transactions_watershed.
+#' @param track_aliases Logical. When TRUE (default), tracks all observed name
+#'   variants for each bank_id in a list-column. Useful for understanding
+#'   naming inconsistencies across sources.
 #' @param max_age_days Integer. Maximum age in days for cached data before
 #'   auto-refresh. Default 30. Set to 0 to always fetch fresh data.
 #' @param force_refresh Logical. Force refresh from APIs even if cache is fresh.
 #'   Default FALSE.
 #'
-#' @return A tibble with columns: name, bank_id, state, district, year_established,
-#'   source (data source), and name_normalized (for fuzzy matching)
+#' @return A tibble with columns:
+#' \describe{
+#'   \item{bank_id}{Numeric bank identifier (primary key)}
+#'   \item{canonical_name}{Most authoritative name (from highest priority source)}
+#'   \item{name_variants}{List of all observed name spellings (if track_aliases=TRUE)}
+#'   \item{state}{State(s) where bank operates}
+#'   \item{district}{USACE district}
+#'   \item{year_established}{Year bank was established}
+#'   \item{bank_status}{Bank status (Approved, Pending, etc.)}
+#'   \item{bank_type}{Bank type (Private Commercial, etc.)}
+#'   \item{sources}{List of sources that confirmed this bank}
+#'   \item{source_count}{Number of sources confirming this bank}
+#'   \item{confidence_score}{0-1 score based on source agreement (higher = more reliable)}
+#'   \item{name_normalized}{Normalized name for fuzzy matching}
+#' }
 #'
 #' @details
 #' The persistent cache is stored in the user's cache directory
 #' (see [rappdirs::user_cache_dir()]). This means:
 #' - Cache persists across R sessions
-#' - First run fetches from API (~10-30 seconds)
+#' - First run fetches from APIs (~10-60 seconds depending on sources)
 #' - Subsequent runs are near-instant (reads from disk)
 #' - Auto-refreshes every 30 days to capture new banks
 #' - Works offline using bundled fallback data
 #'
+#' ## Data Sources (in priority order)
+#' 1. **EPA ArcGIS** - Most reliable, but only Approved banks
+#' 2. **RIBITS API** - Real-time, all banks
+#' 3. **CSV transactions_watershed** - 100% bank_id coverage
+#' 4. **CSV banks_sites** - All statuses, adds bank_status/type
+#' 5. **CSV credit_classification** - Additional name variants
+#' 6. **CSV ledger_transactions** - Additional name variants
+#' 7. **CSV public_notices** - Additional name variants
+#'
 #' @seealso [rb_match_names()] to use the lookup table for name matching
-#' @export
+#' @keywords internal
 #' @examples
 #' \dontrun{
 #' # Build lookup table (uses cache if available)
@@ -43,11 +83,19 @@
 #' # Use shorter cache lifetime (7 days)
 #' lookup <- rb_build_name_lookup(max_age_days = 7)
 #'
+#' # Basic lookup without comprehensive sources
+#' lookup <- rb_build_name_lookup(comprehensive = FALSE)
+#'
+#' # Check confidence scores
+#' lookup |> dplyr::filter(confidence_score < 0.5)
+#'
 #' # Check when bundled data was generated
 #' data(banks_lookup)
 #' attr(banks_lookup, "generated_date")
 #' }
 rb_build_name_lookup <- function(include_csv = TRUE,
+                                  comprehensive = TRUE,
+                                  track_aliases = TRUE,
                                   max_age_days = 30,
                                   force_refresh = FALSE) {
 
@@ -70,7 +118,11 @@ rb_build_name_lookup <- function(include_csv = TRUE,
   cli::cli_h2("Fetching fresh bank lookup data")
 
   lookup <- tryCatch({
-    .fetch_fresh_bank_lookup(include_csv = include_csv)
+    .fetch_fresh_bank_lookup(
+      include_csv = include_csv,
+      comprehensive = comprehensive,
+      track_aliases = track_aliases
+    )
   }, error = function(e) {
     # Step 3: API failed - fall back to bundled package data
     cli::cli_alert_warning("Could not fetch fresh data: {e$message}")
@@ -103,11 +155,13 @@ rb_build_name_lookup <- function(include_csv = TRUE,
 #' Fetch fresh bank lookup data from APIs
 #' @keywords internal
 #' @noRd
-.fetch_fresh_bank_lookup <- function(include_csv = TRUE) {
+.fetch_fresh_bank_lookup <- function(include_csv = TRUE,
+                                      comprehensive = TRUE,
+                                      track_aliases = TRUE) {
 
-  lookup_sources <- list()
+  all_records <- list()
 
-  # Source 1: EPA ArcGIS (most reliable)
+  # Source 1: EPA ArcGIS (most reliable, Approved banks only)
   cli::cli_progress_step("Fetching EPA bank data...")
   epa_banks <- tryCatch({
     rb_epa_query("approved_banks",
@@ -116,17 +170,18 @@ rb_build_name_lookup <- function(include_csv = TRUE,
   }, error = function(e) NULL)
 
   if (!is.null(epa_banks) && nrow(epa_banks) > 0) {
-    # Normalize column names for consistent access (original may be UPPERCASE)
     names(epa_banks) <- tolower(names(epa_banks))
-    lookup_sources$epa <- tibble::tibble(
+    all_records$epa <- tibble::tibble(
       name = epa_banks$bank_name,
-      bank_id = epa_banks$bank_id,
+      bank_id = as.integer(epa_banks$bank_id),
       state = epa_banks$state_list,
       district = epa_banks$district,
-      year_established = epa_banks$year_established,
+      year_established = as.integer(epa_banks$year_established),
+      bank_status = NA_character_,
+      bank_type = NA_character_,
       source = "epa"
     )
-    cli::cli_alert_success("EPA: {nrow(lookup_sources$epa)} banks")
+    cli::cli_alert_success("EPA: {nrow(all_records$epa)} banks")
   }
 
   # Source 2: RIBITS API list
@@ -136,70 +191,322 @@ rb_build_name_lookup <- function(include_csv = TRUE,
   }, error = function(e) NULL)
 
   if (!is.null(api_banks) && nrow(api_banks) > 0) {
-    # Normalize column names for consistent access (original may be UPPERCASE)
     names(api_banks) <- tolower(names(api_banks))
-    lookup_sources$api <- tibble::tibble(
+    all_records$api <- tibble::tibble(
       name = api_banks$name,
-      bank_id = api_banks$bank_id,
+      bank_id = as.integer(api_banks$bank_id),
       state = NA_character_,
       district = NA_character_,
       year_established = NA_integer_,
+      bank_status = NA_character_,
+      bank_type = NA_character_,
       source = "api"
     )
-    cli::cli_alert_success("API: {nrow(lookup_sources$api)} banks")
+    cli::cli_alert_success("API: {nrow(all_records$api)} banks")
   }
 
-  # Source 3: Transactions by Watershed CSV (has name + bank_id pairs)
+  # Source 3: Transactions by Watershed CSV (100% bank_id coverage)
   if (include_csv) {
-    cli::cli_progress_step("Fetching CSV transaction data...")
-    csv_lookup <- tryCatch({
+    cli::cli_progress_step("Fetching CSV transactions_watershed...")
+    csv_watershed <- tryCatch({
       csv_file <- rb_download_report("transactions_watershed", download_dir = tempdir())
       csv_data <- readr::read_csv(csv_file, show_col_types = FALSE)
-
-      # Extract unique name-ID pairs
       csv_data |>
         dplyr::filter(!is.na(`Bank ID`)) |>
         dplyr::select(name = Name, bank_id = `Bank ID`, state = `State List`) |>
         dplyr::distinct() |>
         dplyr::mutate(
+          bank_id = as.integer(bank_id),
           district = NA_character_,
           year_established = NA_integer_,
-          source = "csv"
+          bank_status = NA_character_,
+          bank_type = NA_character_,
+          source = "csv_watershed"
         )
     }, error = function(e) NULL)
 
-    if (!is.null(csv_lookup) && nrow(csv_lookup) > 0) {
-      lookup_sources$csv <- csv_lookup
-      cli::cli_alert_success("CSV: {nrow(lookup_sources$csv)} banks")
+    if (!is.null(csv_watershed) && nrow(csv_watershed) > 0) {
+      all_records$csv_watershed <- csv_watershed
+      cli::cli_alert_success("CSV watershed: {nrow(csv_watershed)} name-ID pairs")
     }
   }
 
-  # Combine all sources (EPA takes priority, then API, then CSV)
-  if (length(lookup_sources) == 0) {
+  # Sources 4-7: Additional CSV sources (comprehensive mode)
+  if (include_csv && comprehensive) {
+
+    # Source 4: Banks & Sites CSV (has bank_status and bank_type!)
+    cli::cli_progress_step("Fetching CSV banks_sites...")
+    csv_banks <- tryCatch({
+      csv_file <- rb_download_report("banks_sites", download_dir = tempdir())
+      csv_data <- readr::read_csv(csv_file, show_col_types = FALSE)
+      csv_data |>
+        dplyr::select(
+          name = Name,
+          state = `State Abbrev List`,
+          bank_status = `Bank Status`,
+          bank_type = `Bank Type`
+        ) |>
+        dplyr::distinct() |>
+        dplyr::mutate(
+          bank_id = NA_integer_,  # banks_sites doesn't have bank_id
+          district = NA_character_,
+          year_established = NA_integer_,
+          source = "csv_banks_sites"
+        )
+    }, error = function(e) NULL)
+
+    if (!is.null(csv_banks) && nrow(csv_banks) > 0) {
+      all_records$csv_banks_sites <- csv_banks
+      cli::cli_alert_success("CSV banks_sites: {nrow(csv_banks)} banks (with status/type)")
+    }
+
+    # Source 5: Credit Classification CSV
+    cli::cli_progress_step("Fetching CSV credit_classification...")
+    csv_credit <- tryCatch({
+      csv_file <- rb_download_report("credit_classification", download_dir = tempdir())
+      csv_data <- readr::read_csv(csv_file, show_col_types = FALSE)
+      # Find the bank name column (may vary)
+      name_col <- names(csv_data)[grepl("bank.*name|name", names(csv_data), ignore.case = TRUE)][1]
+      if (!is.null(name_col) && !is.na(name_col)) {
+        csv_data |>
+          dplyr::select(name = dplyr::all_of(name_col)) |>
+          dplyr::distinct() |>
+          dplyr::mutate(
+            bank_id = NA_integer_,
+            state = NA_character_,
+            district = NA_character_,
+            year_established = NA_integer_,
+            bank_status = NA_character_,
+            bank_type = NA_character_,
+            source = "csv_credit_class"
+          )
+      } else {
+        NULL
+      }
+    }, error = function(e) NULL)
+
+    if (!is.null(csv_credit) && nrow(csv_credit) > 0) {
+      all_records$csv_credit_class <- csv_credit
+      cli::cli_alert_success("CSV credit_classification: {nrow(csv_credit)} unique names")
+    }
+
+    # Source 6: Ledger Transactions CSV
+    cli::cli_progress_step("Fetching CSV ledger_transactions...")
+    csv_ledger <- tryCatch({
+      csv_file <- rb_download_report("ledger_transactions", download_dir = tempdir())
+      csv_data <- readr::read_csv(csv_file, show_col_types = FALSE)
+      name_col <- names(csv_data)[grepl("^name$|bank.*name", names(csv_data), ignore.case = TRUE)][1]
+      if (!is.null(name_col) && !is.na(name_col)) {
+        csv_data |>
+          dplyr::select(name = dplyr::all_of(name_col)) |>
+          dplyr::distinct() |>
+          dplyr::mutate(
+            bank_id = NA_integer_,
+            state = NA_character_,
+            district = NA_character_,
+            year_established = NA_integer_,
+            bank_status = NA_character_,
+            bank_type = NA_character_,
+            source = "csv_ledger"
+          )
+      } else {
+        NULL
+      }
+    }, error = function(e) NULL)
+
+    if (!is.null(csv_ledger) && nrow(csv_ledger) > 0) {
+      all_records$csv_ledger <- csv_ledger
+      cli::cli_alert_success("CSV ledger: {nrow(csv_ledger)} unique names")
+    }
+
+    # Source 7: Public Notices CSV
+    cli::cli_progress_step("Fetching CSV public_notices...")
+    csv_notices <- tryCatch({
+      csv_file <- rb_download_report("public_notices", download_dir = tempdir())
+      csv_data <- readr::read_csv(csv_file, show_col_types = FALSE)
+      name_col <- names(csv_data)[grepl("bank.*name|name", names(csv_data), ignore.case = TRUE)][1]
+      if (!is.null(name_col) && !is.na(name_col)) {
+        csv_data |>
+          dplyr::select(name = dplyr::all_of(name_col)) |>
+          dplyr::distinct() |>
+          dplyr::mutate(
+            bank_id = NA_integer_,
+            state = NA_character_,
+            district = NA_character_,
+            year_established = NA_integer_,
+            bank_status = NA_character_,
+            bank_type = NA_character_,
+            source = "csv_notices"
+          )
+      } else {
+        NULL
+      }
+    }, error = function(e) NULL)
+
+    if (!is.null(csv_notices) && nrow(csv_notices) > 0) {
+      all_records$csv_notices <- csv_notices
+      cli::cli_alert_success("CSV notices: {nrow(csv_notices)} unique names")
+    }
+  }
+
+  # Combine all sources
+  if (length(all_records) == 0) {
     stop("No lookup data available from any source")
   }
 
-  # Stack and deduplicate (keep first occurrence = highest priority source)
-  combined <- dplyr::bind_rows(lookup_sources) |>
-    dplyr::group_by(.data$bank_id) |>
-    dplyr::slice_head(n = 1) |>
-    dplyr::ungroup()
+  cli::cli_progress_step("Building comprehensive lookup table...")
 
-  # Also create normalized name for fuzzy matching
-  combined <- combined |>
+  # Stack all records
+  stacked <- dplyr::bind_rows(all_records)
+
+  # Normalize names for matching
+  stacked <- stacked |>
     dplyr::mutate(
       name_normalized = tolower(name) |>
         stringr::str_replace_all("[^a-z0-9]", " ") |>
         stringr::str_squish()
     )
 
+  # Build the enhanced lookup table
+  combined <- .build_enhanced_lookup(stacked, track_aliases = track_aliases)
+
   # Add metadata
   attr(combined, "fetch_date") <- Sys.Date()
   attr(combined, "n_banks") <- nrow(combined)
+  attr(combined, "sources_used") <- names(all_records)
+  attr(combined, "comprehensive") <- comprehensive
+  attr(combined, "track_aliases") <- track_aliases
 
-  cli::cli_alert_success("Built lookup table: {nrow(combined)} unique banks")
+  cli::cli_alert_success("Built lookup table: {nrow(combined)} unique banks from {length(all_records)} sources")
 
   combined
+}
+
+
+#' Build enhanced lookup table with aliases and confidence
+#' @keywords internal
+#' @noRd
+.build_enhanced_lookup <- function(stacked, track_aliases = TRUE) {
+
+  # First, propagate bank_id from sources that have it to those that don't
+ # This uses name matching to fill in bank_id for csv_banks_sites etc.
+
+  # Get records with bank_id
+  with_id <- stacked |>
+    dplyr::filter(!is.na(bank_id)) |>
+    dplyr::select(name_normalized, bank_id) |>
+    dplyr::distinct()
+
+  # Join back to fill missing bank_ids
+  stacked <- stacked |>
+    dplyr::left_join(
+      with_id |> dplyr::rename(bank_id_from_match = bank_id),
+      by = "name_normalized"
+    ) |>
+    dplyr::mutate(
+      bank_id = dplyr::coalesce(bank_id, bank_id_from_match)
+    ) |>
+    dplyr::select(-bank_id_from_match)
+
+  # Now group by bank_id to aggregate
+  # For records still without bank_id, group by name_normalized
+  with_bank_id <- stacked |> dplyr::filter(!is.na(bank_id))
+  without_bank_id <- stacked |> dplyr::filter(is.na(bank_id))
+
+  # Process records WITH bank_id
+  if (nrow(with_bank_id) > 0) {
+    grouped_with_id <- with_bank_id |>
+      dplyr::group_by(bank_id) |>
+      dplyr::summarise(
+        # Take canonical name from highest priority source
+        canonical_name = name[which.min(match(source, names(LOOKUP_SOURCE_WEIGHTS)))],
+        # Collect all name variants
+        name_variants = if (track_aliases) list(unique(name)) else list(character(0)),
+        # Coalesce metadata from all sources (first non-NA)
+        state = dplyr::first(stats::na.omit(state)),
+        district = dplyr::first(stats::na.omit(district)),
+        year_established = dplyr::first(stats::na.omit(year_established)),
+        bank_status = dplyr::first(stats::na.omit(bank_status)),
+        bank_type = dplyr::first(stats::na.omit(bank_type)),
+        # Track which sources confirmed this bank
+        sources = list(unique(source)),
+        source_count = dplyr::n_distinct(source),
+        # Get normalized name from canonical
+        name_normalized = name_normalized[which.min(match(source, names(LOOKUP_SOURCE_WEIGHTS)))],
+        .groups = "drop"
+      ) |>
+      dplyr::mutate(
+        # Calculate confidence score
+        confidence_score = purrr::map_dbl(sources, .calculate_confidence)
+      )
+  } else {
+    grouped_with_id <- tibble::tibble()
+  }
+
+  # Process records WITHOUT bank_id (will need fuzzy matching later)
+  if (nrow(without_bank_id) > 0) {
+    grouped_without_id <- without_bank_id |>
+      dplyr::group_by(name_normalized) |>
+      dplyr::summarise(
+        bank_id = NA_integer_,
+        canonical_name = name[1],
+        name_variants = if (track_aliases) list(unique(name)) else list(character(0)),
+        state = dplyr::first(stats::na.omit(state)),
+        district = dplyr::first(stats::na.omit(district)),
+        year_established = dplyr::first(stats::na.omit(year_established)),
+        bank_status = dplyr::first(stats::na.omit(bank_status)),
+        bank_type = dplyr::first(stats::na.omit(bank_type)),
+        sources = list(unique(source)),
+        source_count = dplyr::n_distinct(source),
+        .groups = "drop"
+      ) |>
+      dplyr::mutate(
+        confidence_score = purrr::map_dbl(sources, .calculate_confidence)
+      )
+  } else {
+    grouped_without_id <- tibble::tibble()
+  }
+
+  # Combine both
+  combined <- dplyr::bind_rows(grouped_with_id, grouped_without_id)
+
+  # Reorder columns
+  combined <- combined |>
+    dplyr::select(
+      bank_id, canonical_name, name_variants, state, district, year_established,
+      bank_status, bank_type, sources, source_count, confidence_score, name_normalized
+    )
+
+  combined
+}
+
+
+#' Calculate confidence score based on source agreement
+#' @keywords internal
+#' @noRd
+.calculate_confidence <- function(sources) {
+  if (length(sources) == 0) return(0)
+
+  # Get weights for sources that confirmed this bank
+  weights <- LOOKUP_SOURCE_WEIGHTS[sources]
+  weights <- weights[!is.na(weights)]
+
+  if (length(weights) == 0) return(0)
+
+  # Score is based on:
+  # 1. Presence of high-weight sources (EPA, API)
+  # 2. Number of confirming sources
+  weighted_sum <- sum(weights)
+  max_possible <- sum(LOOKUP_SOURCE_WEIGHTS)
+
+  # Base score from weights
+  base_score <- weighted_sum / max_possible
+
+  # Bonus for multiple sources agreeing (up to 20% bonus)
+  agreement_bonus <- min(0.2, (length(weights) - 1) * 0.05)
+
+  # Final score capped at 1.0
+  min(1.0, base_score + agreement_bonus)
 }
 
 
@@ -355,7 +662,7 @@ rb_match_names <- function(data,
 #' fetch on the next call to [rb_build_name_lookup()].
 #'
 #' @return Invisibly returns TRUE if cache was deleted, FALSE if no cache existed
-#' @export
+#' @keywords internal
 #' @examples
 #' \dontrun{
 #' # Clear cache to force fresh fetch

@@ -95,7 +95,7 @@ COLUMN_REGISTRY <- list(
   # ===== Transaction Fields =====
   transaction_id = list(
     canonical = "transaction_id",
-    aliases = c("TRANSACTION_ID", "parent_transaction_id", "PARENT_TRANSACTION_ID", "txn_id")
+    aliases = c("TRANSACTION_ID", "txn_id")
   ),
 
   transaction_type = list(
@@ -175,6 +175,69 @@ COLUMN_REGISTRY <- list(
   phone = list(
     canonical = "phone",
     aliases = c("PHONE", "telephone")
+  ),
+
+  # ===== API-Unique Transaction Fields =====
+  is_transferred = list(
+    canonical = "is_transferred",
+    aliases = c("IS_TRANSFERRED", "transferred")
+  ),
+
+  is_purchased = list(
+    canonical = "is_purchased",
+    aliases = c("IS_PURCHASED", "purchased")
+  ),
+
+  # ===== CSV Ledger-Unique Transaction Fields =====
+  sub_ledger_id = list(
+    canonical = "sub_ledger_id",
+    aliases = c("SUB_LEDGER_ID", "subledger_id", "sub_ledger")
+  ),
+
+  permit_auth_date = list(
+    canonical = "permit_auth_date",
+    aliases = c("PERMIT_AUTH_DATE", "permit_authorization_date", "permit_date")
+  ),
+
+  impact_latitude = list(
+    canonical = "impact_latitude",
+    aliases = c("IMPACT_LATITUDE", "impact_lat", "latitude", "lat")
+  ),
+
+  impact_longitude = list(
+    canonical = "impact_longitude",
+    aliases = c("IMPACT_LONGITUDE", "impact_lon", "impact_long", "longitude", "lon", "long")
+  ),
+
+  parent_transaction_id = list(
+    canonical = "parent_transaction_id",
+    aliases = c("PARENT_TRANSACTION_ID", "parent_txn_id")
+  ),
+
+  sub_ledger_project_name = list(
+    canonical = "sub_ledger_project_name",
+    aliases = c("SUB_LEDGER_PROJECT_NAME", "subledger_project")
+  ),
+
+  # ===== Additional Transaction Fields =====
+  linear_feet = list(
+    canonical = "linear_feet",
+    aliases = c("LINEAR_FEET", "linearfeet")
+  ),
+
+  credit_action = list(
+    canonical = "credit_action",
+    aliases = c("CREDIT_ACTION", "action")
+  ),
+
+  permit_list = list(
+    canonical = "permit_list",
+    aliases = c("PERMIT_LIST", "permits")
+  ),
+
+  impact_quantity = list(
+    canonical = "impact_quantity",
+    aliases = c("IMPACT_QUANTITY")
   )
 )
 

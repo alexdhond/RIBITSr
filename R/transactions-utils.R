@@ -2,6 +2,7 @@
 # Transaction utilities: print methods and validation
 # Split from R/harmonize-transactions.R (644 lines → focused modules)
 
+#' @export
 print.ribits_transactions <- function(x, ...) {
   cli::cli_h1("RIBITS Transaction Data")
 

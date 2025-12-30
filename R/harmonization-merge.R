@@ -11,10 +11,14 @@
 #' @param df2 Second data frame (secondary source)
 #' @param by Column(s) to join on. Default "bank_id".
 #' @param suffix Suffixes for duplicate columns. Default c("_1", "_2").
+#' @param preserve_from_second Character vector of column names that should
+#'   keep the second source's value instead of coalescing (df1 priority).
+#'   Use this for columns that are unique/authoritative in the second source.
 #'
 #' @return A merged data frame with all columns from both sources
 #' @keywords internal
-.merge_preserving_columns <- function(df1, df2, by = "bank_id", suffix = c("_1", "_2")) {
+.merge_preserving_columns <- function(df1, df2, by = "bank_id", suffix = c("_1", "_2"),
+                                       preserve_from_second = character(0)) {
   if (is.null(df1) || nrow(df1) == 0) return(df2)
   if (is.null(df2) || nrow(df2) == 0) return(df1)
 
@@ -56,7 +60,10 @@
   # Full join to preserve all rows
   merged <- dplyr::full_join(df1, df2, by = by, suffix = suffix)
 
-  # Coalesce common columns (df1 takes priority)
+  # Normalize preserve_from_second to lowercase
+  preserve_from_second <- tolower(preserve_from_second)
+
+  # Coalesce common columns (df1 takes priority, unless in preserve_from_second)
   for (col in common_cols) {
     col1 <- paste0(col, suffix[1])
     col2 <- paste0(col, suffix[2])
@@ -72,11 +79,20 @@
         val2 <- as.character(val2)
       }
 
-      # Coalesce: use df1 value if available, else df2
-      merged[[col]] <- dplyr::coalesce(val1, val2)
+      # Check if this column should be preserved from second source
+      if (col %in% preserve_from_second) {
+        # Coalesce with df2 priority (second source's value preferred)
+        merged[[col]] <- dplyr::coalesce(val2, val1)
+      } else {
+        # Default: Coalesce with df1 priority (first source's value preferred)
+        merged[[col]] <- dplyr::coalesce(val1, val2)
+      }
       merged <- merged |> dplyr::select(-dplyr::all_of(c(col1, col2)))
     }
   }
+
+  # Handle columns that exist only in df2 but are in preserve_from_second
+  # (these would have come through as cols2_only and are already present)
 
   merged
 }

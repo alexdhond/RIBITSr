@@ -22,3 +22,4 @@ rb_clear_name_cache()
 lookup <- rb_build_name_lookup()
 }
 }
+\keyword{internal}

@@ -436,7 +436,7 @@ rb_get_multiple_generic <- function(type, ids, get_fn, progress = TRUE, ...) {
 #' @param timeout Numeric. Seconds to wait before timing out. Default 10.
 #' @param verbose Logical. If TRUE, prints status messages. Default FALSE.
 #' @return Logical. TRUE if API is reachable, FALSE otherwise.
-#' @export
+#' @keywords internal
 check_ribits_connection <- function(timeout = 10, verbose = FALSE) {
   if (verbose) {
     cli::cli_alert_info("Testing connection to RIBITS API...")

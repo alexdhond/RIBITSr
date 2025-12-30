@@ -17,3 +17,4 @@ Logical. TRUE if API is reachable, FALSE otherwise.
 \description{
 Checks if the RIBITS API is reachable and responding.
 }
+\keyword{internal}

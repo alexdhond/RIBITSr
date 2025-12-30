@@ -2,14 +2,14 @@
 % Please edit documentation in R/ribits-user.R
 \name{ribits}
 \alias{ribits}
-\title{Get RIBITS data (fully harmonized)}
+\title{Get RIBITS Data}
 \usage{
 ribits(
   type = "banks",
   state = NULL,
   district = NULL,
   ids = NULL,
-  transactions = c("basic", "comprehensive", "none"),
+  transactions = c("comprehensive", "basic", "none"),
   spatial = TRUE,
   sources = c("api", "epa", "csv"),
   cache = TRUE,
@@ -26,52 +26,33 @@ ribits(
 \item "umbrellas": Umbrella mitigation instruments
 }}
 
-\item{state}{State filter (e.g., "CA", "OR", "TX"). Full names (e.g. "California") are also accepted.}
+\item{state}{State filter (e.g., "CA", "OR", "TX"). Full names also accepted.}
 
 \item{district}{USACE district filter (e.g., "Portland", "Sacramento")}
 
 \item{ids}{Optional vector of specific IDs to retrieve (bank_ids, program_ids, etc.).
 Alias: \code{id} can also be used.}
 
-\item{transactions}{Level of transaction data to include (banks only):
+\item{transactions}{Transaction detail level (banks only). Default "comprehensive".
 \itemize{
-\item "none": No transaction data (fastest)
-\item "basic" (default): API ledger only (~20 columns, fast, real-time data)
-\item "comprehensive": Full 3-source harmonization (~85 columns, slower but most complete)
-}
-
-The "comprehensive" option merges data from watershed CSV, API ledger, and CSV reports.
-Use "basic" for quick queries, "comprehensive" for data analysis requiring maximum detail.}
-
-\item{spatial}{Include spatial data (footprints and service area geometries)? Default TRUE.
-Set to FALSE for faster queries when you only need bank attributes.}
-
-\item{sources}{Which data sources to use. Default: c("api", "epa", "csv") (all sources).
-\itemize{
-\item "api" = RIBITS API only (fastest, real-time, ~30 seconds)
-\item "epa" = EPA ArcGIS only (spatial data)
-\item "csv" = Direct CSV downloads (official records, slow)
-\item c("api", "epa", "csv") = All sources (recommended for accuracy, ~60-90 seconds)
-}
-
-Using all sources provides the most complete and accurate data. If a source fails,
-the package automatically falls back to other sources.}
-
-\item{cache}{Cache downloaded CSV files to temp directory? Default TRUE.
-Significantly speeds up repeated queries. Cache is cleared when R session ends.}
-
-\item{include_summaries}{Include comprehensive summaries in banks dataframe? Default TRUE.
-When TRUE, adds summary metrics from:
-\itemize{
-\item Transactions (volume, temporal patterns, geography, permittees)
-\item Anticipated credit releases (upcoming releases in next 5 years)
-\item Public notices (document counts and recency)
-Set to FALSE for minimal banks dataframe with just core attributes.
+\item "comprehensive": All transaction data (~85 columns) - RECOMMENDED
+\item "basic": API ledger only (~20 columns, faster)
+\item "none": No transaction data
 }}
+
+\item{spatial}{Include spatial geometries? Default TRUE.}
+
+\item{sources}{Data sources to use. Default c("api", "epa", "csv") - all sources.
+Using all sources provides the most complete data. If one fails, others are used.}
+
+\item{cache}{Cache downloaded files? Default TRUE. Speeds up repeated queries.}
+
+\item{include_summaries}{Include summary columns? Default TRUE. Adds transaction
+volume, temporal patterns, geography, and public notice counts.}
 
 \item{quietly}{Suppress progress messages? Default FALSE.}
 
-\item{id}{Alternative for \code{ids} for compatibility.}
+\item{id}{Alternative for \code{ids} (for backward compatibility).}
 }
 \value{
 A \code{ribits_data} object containing:
@@ -81,43 +62,38 @@ A \code{ribits_data} object containing:
 \item{.meta}{Metadata including sources used and any discrepancies}
 }
 \description{
-The main function for getting mitigation bank, ILF program, or umbrella data.
-Automatically fetches and harmonizes data from all available sources:
-\itemize{
-\item RIBITS API (real-time data)
-\item EPA ArcGIS MapServer (spatial data)
-\item RIBITS CSV reports (official records, fetched directly)
-}
-}
-\details{
-No manual downloads required - everything is automatic!
+The main function for downloading mitigation banking data. Automatically fetches
+and harmonizes data from all available sources (RIBITS API, EPA ArcGIS, and
+CSV reports). By default, retrieves the maximum amount of data with all columns.
+
+\strong{Philosophy:} Get everything, then filter using tidyverse. This function gives
+you all the data; use dplyr/tidyr to shape it for your analysis.
 }
 \examples{
 \dontrun{
-# Get all California banks (fully harmonized, automatic!)
+# The simple way - get everything for California
 ca <- ribits(state = "CA")
 
 # Access the data
-ca$banks           # Summary data
-ca$transactions    # Transaction history
-ca$geometry        # Spatial polygons
+ca$banks           # All bank attributes, all sources merged
+ca$transactions    # All transaction data (~85 columns)
+ca$geometry        # Spatial footprints and service areas
 
-# Get comprehensive transaction data (3-source harmonization, ~85 columns)
-ca_full <- ribits(state = "CA", transactions = "comprehensive")
+# Filter with tidyverse
+library(dplyr)
+ca$banks \%>\%
+  filter(bank_status == "Approved") \%>\%
+  select(bank_id, bank_name, total_acres, available_credits)
 
 # Get ILF programs
 ilf <- ribits(type = "ilf", state = "TX")
 
-# Get umbrella instruments
-umb <- ribits(type = "umbrellas", state = "FL")
-
 # Get specific banks by ID
 my_banks <- ribits(ids = c(17, 100, 345))
 
-# Just summary data, no spatial or transactions (fastest)
-summary <- ribits(state = "OR", spatial = FALSE, transactions = "none")
-
-# Only use API source (fastest, real-time)
-api_only <- ribits(state = "TX", sources = "api")
+# For speed, reduce data:
+# - Basic transactions instead of comprehensive
+# - Skip spatial data
+fast <- ribits(state = "OR", transactions = "basic", spatial = FALSE)
 }
 }

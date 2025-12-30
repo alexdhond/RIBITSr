@@ -28,3 +28,4 @@ banks <- rb_near(lat = 45.5152, lon = -122.6784)
 programs <- rb_near(lat = 45.5152, lon = -122.6784, type = "programs")
 }
 }
+\keyword{internal}

@@ -4,7 +4,13 @@
 \alias{.merge_preserving_columns}
 \title{Merge data frames preserving all columns from both sources}
 \usage{
-.merge_preserving_columns(df1, df2, by = "bank_id", suffix = c("_1", "_2"))
+.merge_preserving_columns(
+  df1,
+  df2,
+  by = "bank_id",
+  suffix = c("_1", "_2"),
+  preserve_from_second = character(0)
+)
 }
 \arguments{
 \item{df1}{First data frame (priority source)}
@@ -14,6 +20,10 @@
 \item{by}{Column(s) to join on. Default "bank_id".}
 
 \item{suffix}{Suffixes for duplicate columns. Default c("_1", "_2").}
+
+\item{preserve_from_second}{Character vector of column names that should
+keep the second source's value instead of coalescing (df1 priority).
+Use this for columns that are unique/authoritative in the second source.}
 }
 \value{
 A merged data frame with all columns from both sources

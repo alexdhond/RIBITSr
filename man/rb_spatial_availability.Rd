@@ -14,11 +14,12 @@ rb_spatial_availability(bank_ids = NULL, state = NULL, quietly = FALSE)
 \item{quietly}{Suppress progress messages. Default FALSE.}
 }
 \value{
-A tibble with bank_id and logical flags: has_centroid, has_footprint, has_service_area
+A tibble with bank_id, bank_status, epa_layer, and logical flags:
+has_centroid, has_footprint, has_service_area
 }
 \description{
-Quickly checks which banks have footprints and/or service areas available
-WITHOUT downloading the actual geometries. Useful for filtering before
-downloading large spatial datasets.
+Quickly checks which banks have centroids, footprints and/or service areas
+available WITHOUT downloading the actual geometries. Queries all EPA centroid
+layers (approved, pending, terminated) to provide complete coverage.
 }
 \keyword{internal}

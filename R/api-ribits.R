@@ -42,7 +42,7 @@
 #' @param contacts Include contact information? Default FALSE.
 #' @return A tibble or list depending on what's requested
 #' @seealso [ribits()] for the recommended user-friendly interface
-#' @export
+#' @keywords internal
 #' @examples
 #' \dontrun{
 #' # Recommended: Use ribits() for most tasks

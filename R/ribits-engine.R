@@ -15,9 +15,19 @@
                     include_detailed_transactions = FALSE,
                     include_summaries = TRUE,
                     cache = TRUE,
+                    use_checkpoints = TRUE,
                     quietly = FALSE) {
 
   start_time <- Sys.time()
+
+  # Generate unique operation ID for checkpointing
+  operation_id <- if (use_checkpoints) {
+    paste0(
+      type, "_",
+      if (!is.null(state)) state else "all", "_",
+      substr(digest::digest(list(bank_ids, district, what, sources)), 1, 8)
+    )
+  } else NULL
 
   # Normalize sources parameter
   sources <- match.arg(sources, c("api", "epa", "csv"), several.ok = TRUE)
@@ -306,6 +316,11 @@
     }
   }
 
+  # Save checkpoint before expensive spatial fetch (most valuable checkpoint)
+  if (use_checkpoints && include_spatial) {
+    .save_step_checkpoint(operation_id, result, step = 4, description = "pre_spatial")
+  }
+
   # ==========================================================================
   # Step 5: Spatial Data
   # ==========================================================================
@@ -319,59 +334,14 @@
     footprints <- spatial_res$footprints
     service_areas <- spatial_res$service_areas
 
-    # Construct wide geometry (one row per bank)
+    # Build wide geometry (one row per bank with centroid, footprint, service_area)
     if (!is.null(result$banks) && nrow(result$banks) > 0) {
-      geom_base <- result$banks |>
-        dplyr::select(dplyr::any_of(c("bank_id", "bank_name", "bank_status"))) |>
-        dplyr::distinct()
-
-      # 1. Centroids (vectorized parsing)
-      centroids <- .parse_geojson_centroids(result$banks)
-
-      # 2. Footprints
-      fp_wide <- NULL
-      if (!is.null(footprints) && nrow(footprints) > 0 && inherits(footprints, "sf")) {
-          fp_wide <- footprints |>
-            dplyr::group_by(.data$bank_id) |>
-            dplyr::summarise(footprint = sf::st_union(geometry), .groups = "drop") |>
-            sf::st_as_sf()
-      }
-
-      # 3. Service Areas
-      sa_wide <- NULL
-      if (!is.null(service_areas) && nrow(service_areas) > 0 && inherits(service_areas, "sf")) {
-          sa_wide <- service_areas |>
-            dplyr::group_by(.data$bank_id) |>
-            dplyr::summarise(service_area = sf::st_union(geometry), .groups = "drop") |>
-            sf::st_as_sf()
-      }
-
-      # Join all
-      geom_wide <- geom_base
-
-      if (!is.null(centroids)) {
-        geom_wide <- dplyr::left_join(geom_wide, centroids, by = "bank_id")
-      } else {
-        geom_wide$centroid <- sf::st_sfc(purrr::map(seq_len(nrow(geom_wide)), ~ sf::st_point()), crs = 4326)
-      }
-
-      if (!is.null(fp_wide)) {
-        df_fp <- sf::st_drop_geometry(fp_wide)
-        df_fp$footprint <- sf::st_geometry(fp_wide)
-        geom_wide <- dplyr::left_join(geom_wide, df_fp, by = "bank_id")
-      } else {
-        geom_wide$footprint <- sf::st_sfc(purrr::map(seq_len(nrow(geom_wide)), ~ sf::st_polygon()), crs = 4326)
-      }
-
-      if (!is.null(sa_wide)) {
-        df_sa <- sf::st_drop_geometry(sa_wide)
-        df_sa$service_area <- sf::st_geometry(sa_wide)
-        geom_wide <- dplyr::left_join(geom_wide, df_sa, by = "bank_id")
-      } else {
-        geom_wide$service_area <- sf::st_sfc(purrr::map(seq_len(nrow(geom_wide)), ~ sf::st_polygon()), crs = 4326)
-      }
-
-      result$geometry <- sf::st_as_sf(geom_wide, sf_column_name = "centroid")
+      result$geometry <- .build_wide_geometry(
+        banks = result$banks,
+        footprints = footprints,
+        service_areas = service_areas,
+        quietly = quietly
+      )
       result$.meta$sources$geometry <- "epa_arcgis + ribits_api"
 
       if (!quietly) {
@@ -380,9 +350,6 @@
         cli::cli_alert_success("{n_fp} footprints, {n_sa} service areas")
       }
     }
-  } else {
-     # Initialize to NULL if not fetching spatial
-     # (Already done in struct init)
   }
 
   # ==========================================================================
@@ -397,124 +364,6 @@
   }
   if (!is.null(result$.contacts) && nrow(result$.contacts) > 0) {
     result$.contacts <- .finalize_df(result$.contacts, type = "contacts")
-  }
-
-  # ==========================================================================
-  # Create unified geometry layer: wide format (one row per bank)
-  # Columns: bank_id, bank_name, bank_status, centroid, footprint, service_area
-  # ==========================================================================
-  if (include_spatial) {
-
-    # Helper to coalesce name columns into bank_name
-    .coalesce_name <- function(df) {
-      if ("bank_name" %in% names(df) && "name" %in% names(df)) {
-        df$bank_name <- dplyr::coalesce(df$bank_name, df$name)
-        df <- df |> dplyr::select(-name)
-      } else if ("name" %in% names(df) && !("bank_name" %in% names(df))) {
-        names(df)[names(df) == "name"] <- "bank_name"
-      }
-      df
-    }
-
-    # Start with banks as base (one row per bank)
-    if (!is.null(result$banks) && nrow(result$banks) > 0) {
-      geom_base <- result$banks |>
-        dplyr::select(dplyr::any_of(c("bank_id", "bank_name", "bank_status"))) |>
-        dplyr::distinct()
-
-      # 1. Extract centroids from bank_location_centroid (vectorized parsing)
-      centroids <- .parse_geojson_centroids(result$banks)
-
-      # 2. Extract footprints (one per bank_id)
-      fp_wide <- NULL
-      if (!is.null(footprints) && nrow(footprints) > 0 &&
-          inherits(footprints, "sf")) {
-        # Names already cleaned by rb_epa_query()
-        if ("bank_id" %in% names(footprints)) {
-          # Safely extract geometry column using sf::st_geometry()
-          fp_wide <- tryCatch({
-            footprints |>
-              dplyr::group_by(.data$bank_id) |>
-              dplyr::summarise(
-                footprint = sf::st_union(geometry),
-                .groups = "drop"
-              ) |>
-              sf::st_as_sf()
-          }, error = function(e) {
-            if (!quietly) {
-              cli::cli_alert_warning(
-                "Failed to process footprints: {conditionMessage(e)}"
-              )
-            }
-            NULL
-          })
-        }
-      }
-
-      # 3. Extract service areas (one per bank_id)
-      sa_wide <- NULL
-      if (!is.null(service_areas) && nrow(service_areas) > 0 &&
-          inherits(service_areas, "sf")) {
-        # Names already cleaned by rb_epa_query()
-        if ("bank_id" %in% names(service_areas)) {
-          # Safely extract geometry column using sf::st_geometry()
-          sa_wide <- tryCatch({
-            service_areas |>
-              dplyr::group_by(.data$bank_id) |>
-              dplyr::summarise(
-                service_area = sf::st_union(geometry),
-                .groups = "drop"
-              ) |>
-              sf::st_as_sf()
-          }, error = function(e) {
-            if (!quietly) {
-              cli::cli_alert_warning(
-                "Failed to process service areas: {conditionMessage(e)}"
-              )
-            }
-            NULL
-          })
-        }
-      }
-
-      # Join all geometries to base (wide format)
-      result$geometry <- tryCatch({
-        geom_wide <- geom_base
-
-        # Add centroids
-        if (!is.null(centroids)) {
-          geom_wide <- dplyr::left_join(geom_wide, centroids, by = "bank_id")
-        } else {
-          geom_wide$centroid <- sf::st_sfc(purrr::map(seq_len(nrow(geom_wide)), ~ sf::st_point()), crs = 4326)
-        }
-
-        # Add footprints
-        if (!is.null(fp_wide)) {
-          fp_df <- sf::st_drop_geometry(fp_wide)
-          fp_df$footprint <- sf::st_geometry(fp_wide)
-          geom_wide <- dplyr::left_join(geom_wide, fp_df, by = "bank_id")
-        } else {
-          geom_wide$footprint <- sf::st_sfc(purrr::map(seq_len(nrow(geom_wide)), ~ sf::st_polygon()), crs = 4326)
-        }
-
-        # Add service areas
-        if (!is.null(sa_wide)) {
-          sa_df <- sf::st_drop_geometry(sa_wide)
-          sa_df$service_area <- sf::st_geometry(sa_wide)
-          geom_wide <- dplyr::left_join(geom_wide, sa_df, by = "bank_id")
-        } else {
-          geom_wide$service_area <- sf::st_sfc(purrr::map(seq_len(nrow(geom_wide)), ~ sf::st_polygon()), crs = 4326)
-        }
-
-        # Convert to sf with centroid as active geometry (can switch as needed)
-        geom_wide <- sf::st_as_sf(geom_wide, sf_column_name = "centroid")
-
-        geom_wide
-      }, error = function(e) {
-        # Fallback: just return footprints if available
-        if (!is.null(footprints)) footprints else NULL
-      })
-    }
   }
 
   result$.meta$timing$completed <- Sys.time()
@@ -558,6 +407,11 @@
     }
 
     cli::cli_alert_success("Completed in {round(result$.meta$timing$duration_secs, 1)}s")
+  }
+
+  # Clear checkpoint on successful completion
+  if (use_checkpoints && !is.null(operation_id)) {
+    .clear_step_checkpoint(operation_id)
   }
 
   result
@@ -618,4 +472,114 @@
     bank_id = purrr::map_int(valid, "bank_id"),
     centroid = sf::st_sfc(purrr::map(valid, "geom"), crs = 4326)
   )
+}
+
+
+#' Build Wide Geometry Layer
+#'
+#' Constructs a wide-format sf object with one row per bank containing:
+#' bank_id, bank_name, bank_status, centroid, footprint, service_area
+#'
+#' @param banks Data frame with bank_id, bank_name, bank_status, and bank_location_centroid
+#' @param footprints sf object with bank_id and geometry (can be NULL)
+#' @param service_areas sf object with bank_id and geometry (can be NULL)
+#' @param quietly If TRUE, suppress warning messages
+#' @return sf object with wide geometry format, or NULL if no valid data
+#' @keywords internal
+#' @noRd
+.build_wide_geometry <- function(banks, footprints, service_areas, quietly = FALSE) {
+  if (is.null(banks) || nrow(banks) == 0) {
+    return(NULL)
+  }
+
+  # Build base with identifying columns
+
+  geom_base <- banks |>
+    dplyr::select(dplyr::any_of(c("bank_id", "bank_name", "bank_status"))) |>
+    dplyr::distinct()
+
+  # 1. Parse centroids from GeoJSON (vectorized)
+  centroids <- .parse_geojson_centroids(banks)
+
+  # 2. Union footprints by bank_id (with error handling)
+  fp_wide <- NULL
+  if (!is.null(footprints) && nrow(footprints) > 0 && inherits(footprints, "sf")) {
+    if ("bank_id" %in% names(footprints)) {
+      fp_wide <- tryCatch({
+        footprints |>
+          dplyr::group_by(.data$bank_id) |>
+          dplyr::summarise(footprint = sf::st_union(geometry), .groups = "drop") |>
+          sf::st_as_sf()
+      }, error = function(e) {
+        if (!quietly) {
+          cli::cli_alert_warning("Failed to process footprints: {conditionMessage(e)}")
+        }
+        NULL
+      })
+    }
+  }
+
+  # 3. Union service areas by bank_id (with error handling)
+  sa_wide <- NULL
+  if (!is.null(service_areas) && nrow(service_areas) > 0 && inherits(service_areas, "sf")) {
+    if ("bank_id" %in% names(service_areas)) {
+      sa_wide <- tryCatch({
+        service_areas |>
+          dplyr::group_by(.data$bank_id) |>
+          dplyr::summarise(service_area = sf::st_union(geometry), .groups = "drop") |>
+          sf::st_as_sf()
+      }, error = function(e) {
+        if (!quietly) {
+          cli::cli_alert_warning("Failed to process service areas: {conditionMessage(e)}")
+        }
+        NULL
+      })
+    }
+  }
+
+  # 4. Join all geometries to base (wide format)
+  tryCatch({
+    geom_wide <- geom_base
+
+    # Add centroids
+    if (!is.null(centroids)) {
+      geom_wide <- dplyr::left_join(geom_wide, centroids, by = "bank_id")
+    } else {
+      geom_wide$centroid <- sf::st_sfc(
+        purrr::map(seq_len(nrow(geom_wide)), ~ sf::st_point()),
+        crs = 4326
+      )
+    }
+
+    # Add footprints
+    if (!is.null(fp_wide)) {
+      fp_df <- sf::st_drop_geometry(fp_wide)
+      fp_df$footprint <- sf::st_geometry(fp_wide)
+      geom_wide <- dplyr::left_join(geom_wide, fp_df, by = "bank_id")
+    } else {
+      geom_wide$footprint <- sf::st_sfc(
+        purrr::map(seq_len(nrow(geom_wide)), ~ sf::st_polygon()),
+        crs = 4326
+      )
+    }
+
+    # Add service areas
+    if (!is.null(sa_wide)) {
+      sa_df <- sf::st_drop_geometry(sa_wide)
+      sa_df$service_area <- sf::st_geometry(sa_wide)
+      geom_wide <- dplyr::left_join(geom_wide, sa_df, by = "bank_id")
+    } else {
+      geom_wide$service_area <- sf::st_sfc(
+        purrr::map(seq_len(nrow(geom_wide)), ~ sf::st_polygon()),
+        crs = 4326
+      )
+    }
+
+    # Convert to sf with centroid as active geometry
+    sf::st_as_sf(geom_wide, sf_column_name = "centroid")
+
+  }, error = function(e) {
+    # Fallback: return footprints if available
+    if (!is.null(footprints)) footprints else NULL
+  })
 }

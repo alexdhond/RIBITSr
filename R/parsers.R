@@ -137,13 +137,25 @@ rb_read <- function(path, type = NULL, validate = TRUE) {
     # Read first few lines to detect format
     first_lines <- readr::read_lines(path, n_max = 5)
 
-    # Check if first line is empty or just commas (RIBITS quirk)
-    first_line_empty <- nchar(gsub(",", "", first_lines[1])) == 0
+    # Check if first line is empty or mostly commas (RIBITS quirk)
+    # Some CSVs have a "header label row" with mostly empty cells and one label
+    # e.g., ",,,,,,Potential,,,,,,,,,,,,,,,,,," in available_credits_huc
+    # Or just empty: ",,," in banks_sites
+    first_line_content <- gsub(",", "", first_lines[1])
+    first_line_empty <- nchar(first_line_content) == 0
+
+    # Also check if first line is a "sparse header" - mostly empty with few values
+    # Count commas vs non-comma content ratio
+    n_commas <- nchar(first_lines[1]) - nchar(gsub(",", "", first_lines[1]))
+    n_content <- nchar(first_line_content)
+    first_line_sparse <- n_commas >= 2 && n_content < 20 && n_content > 0
 
     skip_rows <- 0
-    if (first_line_empty && length(first_lines) > 1) {
-      # Check if second line looks like headers (contains text)
-      if (nchar(gsub(",", "", first_lines[2])) > 0) {
+    if ((first_line_empty || first_line_sparse) && length(first_lines) > 1) {
+      # Check if second line looks like proper headers (has more content than first)
+      second_line_content <- gsub(",", "", first_lines[2])
+      # Second line should have substantial content (more than first line)
+      if (nchar(second_line_content) > nchar(first_line_content) + 10) {
         skip_rows <- 1
       }
     }

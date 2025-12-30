@@ -174,6 +174,67 @@ rb_clear_checkpoints <- function() {
 
 
 # =============================================================================
+# Step-based checkpointing for engine operations
+# =============================================================================
+
+#' Save step checkpoint (for engine operations)
+#'
+#' @param operation_id Unique identifier for this operation
+#' @param result Current result object
+#' @param step Step number completed
+#' @param description Optional step description
+#' @keywords internal
+#' @noRd
+.save_step_checkpoint <- function(operation_id, result, step, description = NULL) {
+  dir <- .get_checkpoint_dir()
+  if (is.null(dir)) return(invisible())
+
+  checkpoint <- list(
+    result = result,
+    step = step,
+    description = description,
+    timestamp = Sys.time()
+  )
+
+  file <- file.path(dir, paste0("engine_", operation_id, ".rds"))
+  saveRDS(checkpoint, file)
+}
+
+
+#' Load step checkpoint (for engine operations)
+#'
+#' @param operation_id Unique identifier for this operation
+#' @return List with result, step, and timestamp, or NULL if no checkpoint
+#' @keywords internal
+#' @noRd
+.load_step_checkpoint <- function(operation_id) {
+  dir <- .get_checkpoint_dir()
+  if (is.null(dir)) return(NULL)
+
+  file <- file.path(dir, paste0("engine_", operation_id, ".rds"))
+  if (!file.exists(file)) return(NULL)
+
+  readRDS(file)
+}
+
+
+#' Clear step checkpoint (for engine operations)
+#'
+#' @param operation_id Unique identifier for this operation
+#' @keywords internal
+#' @noRd
+.clear_step_checkpoint <- function(operation_id) {
+  dir <- .get_checkpoint_dir()
+  if (is.null(dir)) return(invisible())
+
+  file <- file.path(dir, paste0("engine_", operation_id, ".rds"))
+  if (file.exists(file)) {
+    unlink(file)
+  }
+}
+
+
+# =============================================================================
 # Batch processing with checkpointing
 # =============================================================================
 

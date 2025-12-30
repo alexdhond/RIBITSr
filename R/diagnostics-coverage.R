@@ -16,12 +16,24 @@
 #' @export
 #' @examples
 #' \dontrun{
-#' # Check coverage before downloading
+#' # Before downloading: Check what's available
 #' rb_check(state = "WA")
+#' #> Data Coverage: state=WA
+#' #> ✔ Banks in API: 45
+#' #> ✔ Banks in EPA: 38 (84% of API)
+#' #> ✔ With footprints: 35 (78%)
+#' #> ✔ With service areas: 42 (93%)
 #'
-#' # Check quality after downloading
-#' data <- ribits(state = "WA")
-#' rb_check(data)
+#' # After downloading: Check quality
+#' wa <- ribits(state = "WA")
+#' rb_check(wa)
+#' #> Data Quality Report
+#' #> ✔ 45 banks, bank_name 100% complete
+#' #> ✔ 1,234 transactions
+#' #> ⚠ 3 minor discrepancies resolved
+#'
+#' # See the discrepancies
+#' discrepancies(wa)
 #' }
 rb_check <- function(data = NULL, state = NULL, district = NULL, quietly = FALSE) {
 

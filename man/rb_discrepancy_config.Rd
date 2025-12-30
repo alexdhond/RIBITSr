@@ -77,3 +77,4 @@ rb_discrepancy_config(auto_harmonize = FALSE)
 rb_discrepancy_config("reset")
 }
 }
+\keyword{internal}

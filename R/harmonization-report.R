@@ -13,7 +13,7 @@
 #'
 #' @return A formatted tibble with discrepancy details
 #'
-#' @export
+#' @keywords internal
 #' @examples
 #' \dontrun{
 #' ca <- ribits(state = "CA")
@@ -114,7 +114,7 @@ rb_discrepancy_report <- function(data,
 #' @param data A ribits_data object
 #' @param file_path Path to save CSV file
 #'
-#' @export
+#' @keywords internal
 rb_export_discrepancies <- function(data, file_path = "ribits_discrepancies.csv") {
   disc <- data$.meta$discrepancies
 

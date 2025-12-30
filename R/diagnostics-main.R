@@ -22,7 +22,7 @@
 #' @param state Optional state filter for ledger diagnostics
 #' @param verbose Print detailed output? Default TRUE
 #' @return A list with diagnostic metrics (invisibly)
-#' @export
+#' @keywords internal
 #' @examples
 #' \dontrun{
 #' # Overall data quality

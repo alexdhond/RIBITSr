@@ -14,7 +14,7 @@
 #' @param lon Longitude (decimal degrees)
 #' @param type What to search for: "banks" or "programs". Default "banks".
 #' @return A tibble of results near the location
-#' @export
+#' @keywords internal
 #' @examples
 #' \dontrun{
 #' # Find banks near Portland, OR

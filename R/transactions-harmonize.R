@@ -53,6 +53,7 @@
   unified <- watershed_std
 
   # STEP 3: Add API ledger fields (if available)
+  # API has unique fields: is_transferred, is_purchased, transaction_id
   if (!is.null(api_std)) {
     # Try to merge on both bank_id and transaction_id if available
     # Otherwise fall back to just bank_id
@@ -61,15 +62,20 @@
       merge_keys <- c("bank_id", "transaction_id")
     }
 
+    # Preserve API-unique fields (these are authoritative from API)
+    api_unique_fields <- c("is_transferred", "is_purchased", "transaction_id")
+
     unified <- .merge_preserving_columns(
       unified,
       api_std,
       by = merge_keys,
-      suffix = c("", "_api")
+      suffix = c("", "_api"),
+      preserve_from_second = api_unique_fields
     )
   }
 
   # STEP 4: Add CSV ledger fields (if available)
+  # CSV ledger has unique fields: sub_ledger_id, permit_auth_date, coordinates, parent_transaction_id
   if (!is.null(csv_std)) {
     # Try to merge on both bank_id and transaction_id
     merge_keys <- c("bank_id")
@@ -77,11 +83,17 @@
       merge_keys <- c("bank_id", "transaction_id")
     }
 
+    # Preserve CSV ledger-unique fields (these are authoritative from CSV ledger)
+    csv_unique_fields <- c("sub_ledger_id", "permit_auth_date",
+                            "impact_latitude", "impact_longitude",
+                            "parent_transaction_id", "sub_ledger_project_name")
+
     unified <- .merge_preserving_columns(
       unified,
       csv_std,
       by = merge_keys,
-      suffix = c("", "_csv")
+      suffix = c("", "_csv"),
+      preserve_from_second = csv_unique_fields
     )
   }
 
@@ -109,10 +121,12 @@
         tryCatch({
           lookup <- rb_build_name_lookup(include_csv = FALSE)
           if (!is.null(lookup) && nrow(lookup) > 0) {
+            # Handle both old (name) and new (canonical_name) lookup formats
+            name_col <- if ("canonical_name" %in% names(lookup)) "canonical_name" else "name"
             id_to_name <- lookup |>
-              dplyr::select(bank_id, name) |>
+              dplyr::select(bank_id, !!rlang::sym(name_col)) |>
               dplyr::distinct(bank_id, .keep_all = TRUE) |>
-              dplyr::rename(bank_name_global = name)
+              dplyr::rename(bank_name_global = !!rlang::sym(name_col))
 
             unified <- unified |>
               dplyr::left_join(id_to_name, by = "bank_id") |>

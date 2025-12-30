@@ -15,7 +15,7 @@
 #'
 #' @return A tibble (for nested lists) or sf object (for geojson)
 #'
-#' @export
+#' @keywords internal
 #' @examples
 #' \dontrun{
 #' # Get bank data

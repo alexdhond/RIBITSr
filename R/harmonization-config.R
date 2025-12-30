@@ -33,7 +33,7 @@
 #'
 #' @return Invisibly returns the configuration list
 #'
-#' @export
+#' @keywords internal
 #' @examples
 #' \dontrun{
 #' # Prioritize CSV data (most official)

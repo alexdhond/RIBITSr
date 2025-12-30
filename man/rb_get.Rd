@@ -90,3 +90,4 @@ rb_get()
 \seealso{
 \code{\link[=ribits]{ribits()}} for the recommended user-friendly interface
 }
+\keyword{internal}

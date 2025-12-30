@@ -70,38 +70,116 @@
 }
 
 #' Fetch data from EPA ArcGIS with standard handling
+#'
+#' Queries all EPA bank status layers (approved, pending, terminated) and
+#' combines the results. The terminated layer includes Sold-Out, Suspended,
+#' Terminated, and Withdrawn banks.
+#'
 #' @keywords internal
 #' @noRd
 .fetch_epa_data <- function(type, bank_ids, state, district, quietly = FALSE) {
-  if (!quietly) cli::cli_progress_step("Querying EPA ArcGIS...")
-  
-  tryCatch({
-    # Map type to layer (assuming "banks" type -> "banks" layer for now)
-    # This might need refinement for ILF/Umbrellas if EPA structure differs
-    layer <- if (type == "banks") "banks" else type 
-    
-    epa <- rb_epa(layer, state = state, district = district)
-    
-    if (is.null(epa) || nrow(epa) == 0) {
-      return(NULL)
-    }
-    
-    banks_epa <- sf::st_drop_geometry(epa)
-    
-    # Normalize columns
-    banks_epa <- .normalize_columns(banks_epa)
-    
-    # Filter by bank_ids if provided
-    if (!is.null(bank_ids)) {
-      banks_epa <- .filter_by_bank_ids(banks_epa, bank_ids, quietly = quietly)
-    }
-    
-    banks_epa
-    
-  }, error = function(e) {
-    if (!quietly) cli::cli_alert_warning("EPA query failed: {e$message}")
-    NULL
-  })
+  if (!quietly) cli::cli_progress_step("Querying EPA ArcGIS (all status layers)...")
+
+  if (type != "banks") {
+    # For non-bank types (ILF, umbrellas), use the original simple approach
+    tryCatch({
+      epa <- rb_epa(type, state = state, district = district)
+
+      if (is.null(epa) || nrow(epa) == 0) {
+        return(NULL)
+      }
+
+      result <- sf::st_drop_geometry(epa)
+      result <- .normalize_columns(result)
+
+      if (!is.null(bank_ids)) {
+        result <- .filter_by_bank_ids(result, bank_ids, quietly = quietly)
+      }
+
+      result
+
+    }, error = function(e) {
+      if (!quietly) cli::cli_alert_warning("EPA query failed: {e$message}")
+      NULL
+    })
+  } else {
+    # For banks, query all three status layers and combine
+    tryCatch({
+      results <- list()
+
+      # Layer 2: Approved banks
+      approved <- tryCatch({
+        epa <- rb_epa("approved", state = state, district = district)
+        if (!is.null(epa) && nrow(epa) > 0) {
+          df <- sf::st_drop_geometry(epa)
+          df$epa_layer <- "approved_banks"
+          df
+        } else {
+          NULL
+        }
+      }, error = function(e) NULL)
+
+      if (!is.null(approved) && nrow(approved) > 0) {
+        results$approved <- approved
+        if (!quietly) cli::cli_alert_success("EPA approved: {nrow(approved)} banks")
+      }
+
+      # Layer 3: Pending banks
+      pending <- tryCatch({
+        epa <- rb_epa("pending", state = state, district = district)
+        if (!is.null(epa) && nrow(epa) > 0) {
+          df <- sf::st_drop_geometry(epa)
+          df$epa_layer <- "pending_banks"
+          df
+        } else {
+          NULL
+        }
+      }, error = function(e) NULL)
+
+      if (!is.null(pending) && nrow(pending) > 0) {
+        results$pending <- pending
+        if (!quietly) cli::cli_alert_success("EPA pending: {nrow(pending)} banks")
+      }
+
+      # Layer 4: Terminated banks (includes Sold-Out, Suspended, Terminated, Withdrawn)
+      terminated <- tryCatch({
+        epa <- rb_epa("terminated", state = state, district = district)
+        if (!is.null(epa) && nrow(epa) > 0) {
+          df <- sf::st_drop_geometry(epa)
+          df$epa_layer <- "terminated_banks"
+          df
+        } else {
+          NULL
+        }
+      }, error = function(e) NULL)
+
+      if (!is.null(terminated) && nrow(terminated) > 0) {
+        results$terminated <- terminated
+        if (!quietly) cli::cli_alert_success("EPA terminated/sold-out/etc: {nrow(terminated)} banks")
+      }
+
+      # Combine all results
+      if (length(results) == 0) {
+        return(NULL)
+      }
+
+      banks_epa <- dplyr::bind_rows(results)
+
+      # Normalize columns
+      banks_epa <- .normalize_columns(banks_epa)
+
+      # Filter by bank_ids if provided
+      if (!is.null(bank_ids)) {
+        banks_epa <- .filter_by_bank_ids(banks_epa, bank_ids, quietly = quietly)
+      }
+
+      banks_epa
+
+    }, error = function(e) {
+      if (!quietly) cli::cli_alert_warning("EPA query failed: {e$message}")
+      NULL
+    })
+  }
 }
 
 #' Fetch data from CSV reports with standard handling
@@ -279,21 +357,64 @@
   )
 }
 
+# =============================================================================
+# Summarization Helpers
+# =============================================================================
+
+#' Validate data for summarization
+#'
+#' Common validation for all summarize functions. Checks for null/empty data,
+#' validates bank_id column exists, and optionally adds missing required columns.
+#'
+#' @param data Data frame to validate
+#' @param name Name of the summarizer (for error messages)
+#' @param required_cols Character vector of required column names (optional)
+#' @param fill_type Type to use for filling missing columns: "real", "character", "integer", "date"
+#' @return List with `valid` (logical) and `data` (possibly modified data frame)
+#' @keywords internal
+#' @noRd
+.validate_for_summarize <- function(data, name, required_cols = NULL, fill_type = "real") {
+  # Check null/empty
+  if (is.null(data) || nrow(data) == 0) {
+    return(list(valid = FALSE, data = NULL))
+  }
+
+  # Check bank_id exists
+  if (!"bank_id" %in% names(data)) {
+    cli::cli_alert_warning("No bank_id column in {name} - cannot summarize")
+    return(list(valid = FALSE, data = NULL))
+  }
+
+  # Add missing required columns as NA
+  if (!is.null(required_cols)) {
+    missing_cols <- setdiff(required_cols, names(data))
+    if (length(missing_cols) > 0) {
+      cli::cli_alert_warning("Missing columns in {name}: {paste(missing_cols, collapse = ', ')}")
+      fill_value <- switch(fill_type,
+        real = NA_real_,
+        character = NA_character_,
+        integer = NA_integer_,
+        date = as.Date(NA),
+        NA
+      )
+      for (col in missing_cols) {
+        data[[col]] <- fill_value
+      }
+    }
+  }
+
+  list(valid = TRUE, data = data)
+}
+
+
 #' Summarize Contacts for Banks Dataframe
 #' @keywords internal
 #' @noRd
 .summarize_contacts <- function(contacts) {
-  if (is.null(contacts) || nrow(contacts) == 0) {
-    return(tibble::tibble(bank_id = integer()))
-  }
+  check <- .validate_for_summarize(contacts, "contacts")
+  if (!check$valid) return(tibble::tibble(bank_id = integer()))
 
-  # Ensure bank_id exists
-  if (!"bank_id" %in% names(contacts)) {
-    cli::cli_alert_warning("No bank_id column in contacts - cannot summarize")
-    return(tibble::tibble(bank_id = integer()))
-  }
-
-  contacts |>
+  check$data |>
     dplyr::group_by(.data$bank_id) |>
     dplyr::summarise(
       # Primary sponsor
@@ -329,29 +450,15 @@
 #' @keywords internal
 #' @noRd
 .summarize_credits <- function(credit_summary) {
-  if (is.null(credit_summary) || nrow(credit_summary) == 0) {
-    return(tibble::tibble(bank_id = integer()))
-  }
+  check <- .validate_for_summarize(
+    credit_summary,
+    "credit_summary",
+    required_cols = c("available_credits", "released_credits", "potential_credits", "credit_classification"),
+    fill_type = "real"
+  )
+  if (!check$valid) return(tibble::tibble(bank_id = integer()))
 
-  # Ensure bank_id exists
-  if (!"bank_id" %in% names(credit_summary)) {
-    cli::cli_alert_warning("No bank_id column in credit_summary - cannot summarize")
-    return(tibble::tibble(bank_id = integer()))
-  }
-
-  # Ensure required columns exist
-  required_cols <- c("available_credits", "released_credits", "potential_credits", "credit_classification")
-  missing_cols <- setdiff(required_cols, names(credit_summary))
-
-  if (length(missing_cols) > 0) {
-    cli::cli_alert_warning("Missing columns in credit_summary: {paste(missing_cols, collapse = ', ')}")
-    # Add missing columns as NA
-    for (col in missing_cols) {
-      credit_summary[[col]] <- NA_real_
-    }
-  }
-
-  credit_summary |>
+  check$data |>
     dplyr::group_by(.data$bank_id) |>
     dplyr::summarise(
       # Totals across all classifications
@@ -386,16 +493,10 @@
 #' @keywords internal
 #' @noRd
 .summarize_transactions <- function(transactions) {
-  if (is.null(transactions) || nrow(transactions) == 0) {
-    return(tibble::tibble(bank_id = integer()))
-  }
+  check <- .validate_for_summarize(transactions, "transactions")
+  if (!check$valid) return(tibble::tibble(bank_id = integer()))
 
-  # Ensure bank_id exists and is integer
-  if (!"bank_id" %in% names(transactions)) {
-    cli::cli_alert_warning("No bank_id column in transactions - cannot summarize")
-    return(tibble::tibble(bank_id = integer()))
-  }
-
+  transactions <- check$data
   # Ensure bank_id is integer for consistent typing across joins
   transactions$bank_id <- as.integer(transactions$bank_id)
 
@@ -531,33 +632,25 @@
 #' @keywords internal
 #' @noRd
 .summarize_credit_releases <- function(credit_releases) {
-  if (is.null(credit_releases) || nrow(credit_releases) == 0) {
-    return(tibble::tibble(bank_id = integer()))
-  }
+  check <- .validate_for_summarize(
+    credit_releases,
+    "credit_releases",
+    required_cols = c("credits"),
+    fill_type = "real"
+  )
+  if (!check$valid) return(tibble::tibble(bank_id = integer()))
 
-  # Ensure bank_id exists
-  if (!"bank_id" %in% names(credit_releases)) {
-    cli::cli_alert_warning("No bank_id column in credit_releases - cannot summarize")
-    return(tibble::tibble(bank_id = integer()))
-  }
+  credit_releases <- check$data
 
-  # Ensure required columns exist
-  if (!"credits" %in% names(credit_releases)) {
-    cli::cli_alert_warning("Missing 'credits' column in credit_releases")
-    credit_releases$credits <- NA_real_
-  }
-
+  # Handle anticipated_release_date specially (needs date parsing)
   if (!"anticipated_release_date" %in% names(credit_releases)) {
-    cli::cli_alert_warning("Missing 'anticipated_release_date' column in credit_releases")
     credit_releases$anticipated_release_date <- as.Date(NA)
-  } else {
+  } else if (is.character(credit_releases$anticipated_release_date)) {
     # Parse date column if it's character (MM/DD/YYYY format from CSV)
-    if (is.character(credit_releases$anticipated_release_date)) {
-      credit_releases$anticipated_release_date <- as.Date(
-        credit_releases$anticipated_release_date,
-        format = "%m/%d/%Y"
-      )
-    }
+    credit_releases$anticipated_release_date <- as.Date(
+      credit_releases$anticipated_release_date,
+      format = "%m/%d/%Y"
+    )
   }
 
   # Check for stale data and warn user
@@ -616,29 +709,18 @@
 #' @keywords internal
 #' @noRd
 .summarize_public_notices <- function(public_notices) {
-  if (is.null(public_notices) || nrow(public_notices) == 0) {
-    return(tibble::tibble(bank_id = integer()))
-  }
+  check <- .validate_for_summarize(public_notices, "public_notices")
+  if (!check$valid) return(tibble::tibble(bank_id = integer()))
 
-  # Ensure bank_id exists
-  if (!"bank_id" %in% names(public_notices)) {
-    cli::cli_alert_warning("No bank_id column in public_notices - cannot summarize")
-    return(tibble::tibble(bank_id = integer()))
-  }
+  public_notices <- check$data
 
-  # Ensure create_date exists and is a Date type
+  # Handle create_date specially (needs date parsing)
   if (!"create_date" %in% names(public_notices)) {
-    cli::cli_alert_warning("Missing 'create_date' column in public_notices")
     public_notices$create_date <- as.Date(NA)
   } else if (!inherits(public_notices$create_date, "Date")) {
     # Convert to Date if not already (handles character dates from CSV)
     parsed <- .try_parse_date(public_notices$create_date)
-    if (!is.null(parsed)) {
-      public_notices$create_date <- parsed
-    } else {
-      # Fallback: set to NA if parsing fails
-      public_notices$create_date <- as.Date(NA)
-    }
+    public_notices$create_date <- if (!is.null(parsed)) parsed else as.Date(NA)
   }
 
   public_notices |>

@@ -61,3 +61,4 @@ rb_diagnose(ca, type = "sources")
 rb_diagnose(bank_ids = c(17, 100), type = "ledger")
 }
 }
+\keyword{internal}

@@ -169,82 +169,170 @@ rb_epa_query <- function(layer,
 
 #' Get spatial data availability flags for banks
 #'
-#' Quickly checks which banks have footprints and/or service areas available
-#' WITHOUT downloading the actual geometries. Useful for filtering before
-#' downloading large spatial datasets.
+#' Quickly checks which banks have centroids, footprints and/or service areas
+#' available WITHOUT downloading the actual geometries. Queries all EPA centroid
+#' layers (approved, pending, terminated) to provide complete coverage.
 #'
 #' @param bank_ids Optional vector of bank IDs to check. If NULL, checks all.
 #' @param state Optional state filter (e.g., "CA")
 #' @param quietly Suppress progress messages. Default FALSE.
 #'
-#' @return A tibble with bank_id and logical flags: has_centroid, has_footprint, has_service_area
+#' @return A tibble with bank_id, bank_status, epa_layer, and logical flags:
+#'   has_centroid, has_footprint, has_service_area
 #' @keywords internal
 rb_spatial_availability <- function(bank_ids = NULL, state = NULL, quietly = FALSE) {
-  
-  # Build WHERE clause for banks layer
+
+  # Build WHERE clause for state filter
   where <- "1=1"
   if (!is.null(state)) {
     where <- paste0("STATE_LIST LIKE '%", state, "%'")
   }
-  
-  # Get bank IDs from approved_banks layer (this layer has point/centroid geometry)
-  if (!quietly) cli::cli_progress_step("Fetching bank list...")
-  
-  banks <- rb_epa_query("approved_banks", where = where, bank_ids = bank_ids,
-                         out_fields = "BANK_ID", return_geometry = FALSE)
-  
-  if (is.null(banks) || nrow(banks) == 0) {
-    if (!quietly) cli::cli_alert_warning("No banks found")
+
+  # Get bank IDs from ALL centroid layers (approved, pending, terminated)
+  if (!quietly) cli::cli_progress_step("Fetching bank list from all EPA layers...")
+
+  all_banks <- list()
+
+  # Layer 2: Approved banks
+  approved <- tryCatch({
+    epa <- rb_epa_query("approved_banks", where = where, bank_ids = bank_ids,
+                         out_fields = "BANK_ID,BANK_STATUS", return_geometry = FALSE)
+    if (!is.null(epa) && nrow(epa) > 0) {
+      names(epa) <- tolower(names(epa))
+      tibble::tibble(
+        bank_id = as.integer(epa$bank_id),
+        bank_status = epa$bank_status %||% "Approved",
+        epa_layer = "approved_banks"
+      )
+    } else {
+      NULL
+    }
+  }, error = function(e) NULL)
+
+  if (!is.null(approved)) {
+    all_banks$approved <- approved
+    if (!quietly) cli::cli_alert_success("Approved: {nrow(approved)} banks")
+  }
+
+  # Layer 3: Pending banks
+  pending <- tryCatch({
+    epa <- rb_epa_query("pending_banks", where = where, bank_ids = bank_ids,
+                         out_fields = "BANK_ID,BANK_STATUS", return_geometry = FALSE)
+    if (!is.null(epa) && nrow(epa) > 0) {
+      names(epa) <- tolower(names(epa))
+      tibble::tibble(
+        bank_id = as.integer(epa$bank_id),
+        bank_status = epa$bank_status %||% "Pending",
+        epa_layer = "pending_banks"
+      )
+    } else {
+      NULL
+    }
+  }, error = function(e) NULL)
+
+  if (!is.null(pending)) {
+    all_banks$pending <- pending
+    if (!quietly) cli::cli_alert_success("Pending: {nrow(pending)} banks")
+  }
+
+  # Layer 4: Terminated banks (includes Sold-Out, Suspended, Terminated, Withdrawn)
+  terminated <- tryCatch({
+    epa <- rb_epa_query("terminated_banks", where = where, bank_ids = bank_ids,
+                         out_fields = "BANK_ID,BANK_STATUS", return_geometry = FALSE)
+    if (!is.null(epa) && nrow(epa) > 0) {
+      names(epa) <- tolower(names(epa))
+      tibble::tibble(
+        bank_id = as.integer(epa$bank_id),
+        bank_status = epa$bank_status %||% "Terminated",
+        epa_layer = "terminated_banks"
+      )
+    } else {
+      NULL
+    }
+  }, error = function(e) NULL)
+
+  if (!is.null(terminated)) {
+    all_banks$terminated <- terminated
+    if (!quietly) cli::cli_alert_success("Terminated/Sold-Out/etc: {nrow(terminated)} banks")
+  }
+
+  # Combine all banks
+  if (length(all_banks) == 0) {
+    if (!quietly) cli::cli_alert_warning("No banks found in any EPA layer")
     return(tibble::tibble(
       bank_id = integer(),
+      bank_status = character(),
+      epa_layer = character(),
       has_centroid = logical(),
       has_footprint = logical(),
       has_service_area = logical()
     ))
   }
-  
-  # Get bank_id column
-  id_col <- .get_column_case_insensitive(banks, "bank_id")
-  all_bank_ids <- banks[[id_col]]
-  if (!quietly) cli::cli_alert_success("Found {length(all_bank_ids)} banks (all have centroids)")
 
-  # Get bank IDs that have footprints (query by bank_id, not state)
+  banks <- dplyr::bind_rows(all_banks)
+  all_bank_ids <- banks$bank_id
+
+  if (!quietly) cli::cli_alert_success("Total: {length(all_bank_ids)} banks with EPA centroids")
+
+  # Get bank IDs that have footprints
   if (!quietly) cli::cli_progress_step("Checking footprint availability...")
   fp_banks <- tryCatch({
     fp <- rb_epa_query("bank_footprints", bank_ids = all_bank_ids,
                         out_fields = "BANK_ID", return_geometry = FALSE)
-    fp_id_col <- .get_column_case_insensitive(fp, "bank_id")
-    unique(fp[[fp_id_col]])
+    if (!is.null(fp) && nrow(fp) > 0) {
+      names(fp) <- tolower(names(fp))
+      unique(as.integer(fp$bank_id))
+    } else {
+      integer()
+    }
   }, error = function(e) integer())
 
   if (!quietly) cli::cli_alert_success("{length(fp_banks)} banks have footprints")
 
-  # Get bank IDs that have service areas (query by bank_id, not state)
+  # Get bank IDs that have service areas
   if (!quietly) cli::cli_progress_step("Checking service area availability...")
   sa_banks <- tryCatch({
     sa <- rb_epa_query("bank_service_areas", bank_ids = all_bank_ids,
                         out_fields = "BANK_ID", return_geometry = FALSE)
-    sa_id_col <- .get_column_case_insensitive(sa, "bank_id")
-    unique(sa[[sa_id_col]])
+    if (!is.null(sa) && nrow(sa) > 0) {
+      names(sa) <- tolower(names(sa))
+      unique(as.integer(sa$bank_id))
+    } else {
+      integer()
+    }
   }, error = function(e) integer())
-  
+
   if (!quietly) cli::cli_alert_success("{length(sa_banks)} banks have service areas")
-  
-  # Build result - all banks in approved_banks have centroids (point geometry)
-  result <- tibble::tibble(
-    bank_id = all_bank_ids,
-    has_centroid = TRUE,  # All banks in approved_banks layer have point/centroid
-    has_footprint = all_bank_ids %in% fp_banks,
-    has_service_area = all_bank_ids %in% sa_banks
-  )
-  
+
+  # Build result with status information
+  result <- banks |>
+    dplyr::mutate(
+      has_centroid = TRUE,  # All banks from centroid layers have centroids
+      has_footprint = bank_id %in% fp_banks,
+      has_service_area = bank_id %in% sa_banks
+    )
+
   if (!quietly) {
     n_fp <- sum(result$has_footprint)
     n_sa <- sum(result$has_service_area)
-    n_both <- sum(result$has_footprint & result$has_service_area)
-    cli::cli_alert_info("Summary: {nrow(result)} centroids, {n_fp} footprints, {n_sa} service areas")
+
+    # Status breakdown
+    status_summary <- result |>
+      dplyr::group_by(bank_status) |>
+      dplyr::summarise(
+        n = dplyr::n(),
+        fp_pct = round(100 * sum(has_footprint) / dplyr::n(), 0),
+        sa_pct = round(100 * sum(has_service_area) / dplyr::n(), 0),
+        .groups = "drop"
+      )
+
+    cli::cli_h3("Spatial Availability by Status")
+    for (i in seq_len(nrow(status_summary))) {
+      row <- status_summary[i, ]
+      cli::cli_alert_info("{row$bank_status}: {row$n} banks ({row$fp_pct}% footprints, {row$sa_pct}% service areas)")
+    }
   }
-  
+
   result
 }
 

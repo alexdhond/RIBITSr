@@ -48,3 +48,4 @@ footprint <- rb_extract(bank, "bank_footprint")
 ledger_no_id <- rb_extract(bank, "ledger", add_id = FALSE)
 }
 }
+\keyword{internal}

@@ -6,13 +6,24 @@
 \usage{
 rb_build_name_lookup(
   include_csv = TRUE,
+  comprehensive = TRUE,
+  track_aliases = TRUE,
   max_age_days = 30,
   force_refresh = FALSE
 )
 }
 \arguments{
-\item{include_csv}{Logical. Also include mappings from transactions_watershed CSV
-when fetching fresh data. Default TRUE.}
+\item{include_csv}{Logical. Include mappings from CSV sources when fetching
+fresh data. Default TRUE.}
+
+\item{comprehensive}{Logical. When TRUE (default), fetches from all available
+CSV sources (banks_sites, credit_classification, ledger_transactions,
+public_notices) in addition to EPA, API, and transactions_watershed.
+When FALSE, only uses EPA, API, and transactions_watershed.}
+
+\item{track_aliases}{Logical. When TRUE (default), tracks all observed name
+variants for each bank_id in a list-column. Useful for understanding
+naming inconsistencies across sources.}
 
 \item{max_age_days}{Integer. Maximum age in days for cached data before
 auto-refresh. Default 30. Set to 0 to always fetch fresh data.}
@@ -21,13 +32,26 @@ auto-refresh. Default 30. Set to 0 to always fetch fresh data.}
 Default FALSE.}
 }
 \value{
-A tibble with columns: name, bank_id, state, district, year_established,
-source (data source), and name_normalized (for fuzzy matching)
+A tibble with columns:
+\describe{
+\item{bank_id}{Numeric bank identifier (primary key)}
+\item{canonical_name}{Most authoritative name (from highest priority source)}
+\item{name_variants}{List of all observed name spellings (if track_aliases=TRUE)}
+\item{state}{State(s) where bank operates}
+\item{district}{USACE district}
+\item{year_established}{Year bank was established}
+\item{bank_status}{Bank status (Approved, Pending, etc.)}
+\item{bank_type}{Bank type (Private Commercial, etc.)}
+\item{sources}{List of sources that confirmed this bank}
+\item{source_count}{Number of sources confirming this bank}
+\item{confidence_score}{0-1 score based on source agreement (higher = more reliable)}
+\item{name_normalized}{Normalized name for fuzzy matching}
+}
 }
 \description{
 Creates a lookup table mapping bank/program names to their IDs using
-data from EPA ArcGIS and the RIBITS API. This function implements a
-smart caching strategy to minimize API calls:
+data from EPA ArcGIS, RIBITS API, and multiple CSV sources. This function
+implements a smart caching strategy to minimize API calls:
 }
 \details{
 \enumerate{
@@ -40,10 +64,21 @@ The persistent cache is stored in the user's cache directory
 (see \code{\link[rappdirs:user_cache_dir]{rappdirs::user_cache_dir()}}). This means:
 \itemize{
 \item Cache persists across R sessions
-\item First run fetches from API (~10-30 seconds)
+\item First run fetches from APIs (~10-60 seconds depending on sources)
 \item Subsequent runs are near-instant (reads from disk)
 \item Auto-refreshes every 30 days to capture new banks
 \item Works offline using bundled fallback data
+}
+\subsection{Data Sources (in priority order)}{
+\enumerate{
+\item \strong{EPA ArcGIS} - Most reliable, but only Approved banks
+\item \strong{RIBITS API} - Real-time, all banks
+\item \strong{CSV transactions_watershed} - 100\% bank_id coverage
+\item \strong{CSV banks_sites} - All statuses, adds bank_status/type
+\item \strong{CSV credit_classification} - Additional name variants
+\item \strong{CSV ledger_transactions} - Additional name variants
+\item \strong{CSV public_notices} - Additional name variants
+}
 }
 }
 \examples{
@@ -57,6 +92,12 @@ lookup <- rb_build_name_lookup(force_refresh = TRUE)
 # Use shorter cache lifetime (7 days)
 lookup <- rb_build_name_lookup(max_age_days = 7)
 
+# Basic lookup without comprehensive sources
+lookup <- rb_build_name_lookup(comprehensive = FALSE)
+
+# Check confidence scores
+lookup |> dplyr::filter(confidence_score < 0.5)
+
 # Check when bundled data was generated
 data(banks_lookup)
 attr(banks_lookup, "generated_date")
@@ -65,3 +106,4 @@ attr(banks_lookup, "generated_date")
 \seealso{
 \code{\link[=rb_match_names]{rb_match_names()}} to use the lookup table for name matching
 }
+\keyword{internal}
