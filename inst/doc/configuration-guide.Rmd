@@ -1,0 +1,570 @@
+---
+title: "Configuration Guide"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{Configuration Guide}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r, include = FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>",
+  eval = FALSE
+)
+```
+
+```{r setup}
+library(RIBITSr)
+```
+
+# Introduction
+
+RIBITSr provides extensive configuration options to control network behavior, caching, performance, and data quality. This guide covers all configuration options and provides practical examples for common use cases.
+
+## Quick Overview
+
+All configuration is managed through the `rb_config()` function:
+
+```{r}
+# View current configuration
+rb_config()
+
+# Change settings
+rb_config(max_retries = 5, rate_limit = 3)
+
+# Reset to defaults
+rb_config(reset = TRUE)
+```
+
+# Network & Reliability Settings
+
+## Retry Behavior
+
+RIBITSr automatically retries failed requests with exponential backoff. Configure retry behavior for unreliable networks:
+
+```{r}
+# Increase retries for unreliable connections
+rb_config(
+  max_retries = 5,      # Default: 3
+  retry_delay = 3       # Initial delay in seconds (default: 2)
+)
+```
+
+**How it works:**
+- Failed requests are automatically retried with exponential backoff
+- Retry delays: 2s, 4s, 8s, 16s, 32s...
+- Permanent errors (404, 401, 403) are not retried
+- Network errors and server errors (5xx) are retried
+
+**When to adjust:**
+- Increase `max_retries` if working from an unreliable network
+- Increase `retry_delay` if the RIBITS server is slow to respond
+- Decrease both for faster failures when debugging
+
+## Timeouts
+
+Control how long to wait for responses:
+
+```{r}
+# Set longer timeout for large CSV downloads
+rb_config(timeout = 300)  # 5 minutes (default: 60 seconds)
+```
+
+**Note:** CSV downloads automatically use a 300-second timeout regardless of this setting.
+
+## Rate Limiting
+
+Prevent overwhelming the RIBITS server:
+
+```{r}
+# More conservative rate limit
+rb_config(rate_limit = 2)  # 2 requests/second (default: 5)
+
+# More aggressive (use with caution)
+rb_config(rate_limit = 10)  # 10 requests/second
+
+# Disable rate limiting (not recommended)
+rb_config(rate_limit = 0)
+```
+
+**Best practices:**
+- Default (5 req/sec) works well for most use cases
+- Reduce to 2-3 if you encounter 429 (rate limit) errors
+- Never disable rate limiting unless testing locally
+
+# Caching
+
+## Session-Only Cache (Default)
+
+By default, RIBITSr caches data only for the current R session:
+
+```{r}
+# First call downloads from RIBITS
+banks <- ribits(state = "CA")
+
+# Second call uses cache (fast!)
+banks <- ribits(state = "CA")
+
+# Cache cleared when R restarts
+```
+
+## Persistent Cache
+
+Enable caching across R sessions for frequently-accessed data:
+
+```{r}
+# Enable persistent caching
+rb_config(
+  use_persistent_cache = TRUE,
+  cache_max_age_days = 7     # Auto-delete files older than 7 days
+)
+```
+
+**Cache locations:**
+- Session cache: `tempdir()/ribits_cache/` (deleted on R exit)
+- Persistent cache: User cache directory via `rappdirs::user_cache_dir("ribits", "RIBITSr")`
+
+## Cache Management
+
+```{r}
+# Clear all cache
+rb_clear_cache()
+
+# Clear only CSV reports
+rb_clear_cache("csv")
+
+# Clear only name lookup table
+rb_clear_cache("lookup")
+
+# Silent clearing
+rb_clear_cache(verbose = FALSE)
+```
+
+## Custom Cache Directory
+
+Specify a custom cache location:
+
+```{r}
+# Set custom cache directory
+Sys.setenv(RIBITS_CACHE_DIR = "/path/to/my/cache")
+
+# Or in .Renviron:
+# RIBITS_CACHE_DIR=/path/to/my/cache
+```
+
+# Data Quality Settings
+
+## Source Priority
+
+When harmonizing data from multiple sources, control which source is preferred for conflict resolution:
+
+```{r}
+# Prefer API over CSV over EPA (default)
+rb_config(source_priority = c("api", "csv", "epa"))
+
+# Prefer CSV over API (e.g., if CSV is known to be more accurate)
+rb_config(source_priority = c("csv", "api", "epa"))
+```
+
+## Automatic Conflict Resolution
+
+Control how discrepancies between sources are handled:
+
+```{r}
+# Automatically resolve conflicts using source priority (default)
+rb_config(auto_resolve = TRUE)
+
+# Preserve all conflicting values and let user decide
+rb_config(auto_resolve = FALSE)
+```
+
+When `auto_resolve = FALSE`, the `rb_diagnose()` function will show all conflicts for manual inspection.
+
+# Environment Variables
+
+Configure RIBITSr via environment variables for reproducible workflows:
+
+## Setting Environment Variables
+
+Create or edit `.Renviron` in your home directory or project root:
+
+```bash
+# Network settings
+RIBITS_MAX_RETRIES=5
+RIBITS_RETRY_DELAY=3
+RIBITS_TIMEOUT=120
+RIBITS_RATE_LIMIT=3
+
+# Caching
+RIBITS_USE_PERSISTENT_CACHE=true
+RIBITS_CACHE_DIR=/path/to/cache
+RIBITS_CACHE_MAX_AGE_DAYS=14
+
+# Data quality
+RIBITS_AUTO_RESOLVE=true
+```
+
+Environment variables are loaded automatically when RIBITSr loads. They have lower priority than `rb_config()` calls.
+
+## Checking Environment Variables
+
+```{r}
+# See what environment variables are set
+Sys.getenv("RIBITS_MAX_RETRIES")
+Sys.getenv("RIBITS_RATE_LIMIT")
+```
+
+# Common Use Cases
+
+## Scenario 1: Unreliable Network Connection
+
+You're working from a location with spotty internet:
+
+```{r}
+# Maximize reliability
+rb_config(
+  max_retries = 5,           # More retries
+  retry_delay = 4,           # Longer delays
+  timeout = 180,             # 3-minute timeout
+  rate_limit = 2             # Slower requests
+)
+```
+
+## Scenario 2: Daily Analysis Workflow
+
+You run the same analysis daily and want to minimize download time:
+
+```{r}
+# Enable persistent caching
+rb_config(
+  use_persistent_cache = TRUE,
+  cache_max_age_days = 1      # Refresh daily
+)
+
+# First run: downloads and caches
+banks <- ribits(state = "CA", transactions = "comprehensive")
+
+# Subsequent runs same day: uses cache (fast!)
+banks <- ribits(state = "CA", transactions = "comprehensive")
+```
+
+## Scenario 3: Bulk Data Extraction
+
+You need to download data for all 50 states:
+
+```{r}
+# Optimize for bulk operations
+rb_config(
+  max_retries = 3,
+  rate_limit = 3,            # Conservative rate limit
+  use_persistent_cache = TRUE,
+  cache_max_age_days = 7
+)
+
+# Extract state by state with checkpointing
+all_states <- c("AL", "AK", "AZ", ...)
+results <- list()
+
+for (state in all_states) {
+  results[[state]] <- ribits(state = state, transactions = "comprehensive")
+
+  # Save checkpoint
+  saveRDS(results, "ribits_bulk_extraction.rds")
+}
+```
+
+## Scenario 4: Production Environment
+
+Running automated reports on a server:
+
+```{r}
+# Reliable, conservative settings
+rb_config(
+  max_retries = 5,
+  retry_delay = 2,
+  timeout = 300,
+  rate_limit = 3,
+  use_persistent_cache = TRUE,
+  cache_max_age_days = 1,    # Refresh nightly
+  auto_resolve = TRUE
+)
+```
+
+Set via environment variables in production `.Renviron`:
+
+```bash
+RIBITS_MAX_RETRIES=5
+RIBITS_RATE_LIMIT=3
+RIBITS_USE_PERSISTENT_CACHE=true
+RIBITS_CACHE_MAX_AGE_DAYS=1
+```
+
+## Scenario 5: Development & Testing
+
+You're developing new analysis code and need fast iterations:
+
+```{r}
+# Speed over reliability
+rb_config(
+  max_retries = 1,           # Fail fast
+  timeout = 30,              # Short timeout
+  rate_limit = 10,           # Fast requests (local testing only!)
+  use_persistent_cache = TRUE  # Avoid re-downloading
+)
+```
+
+# Troubleshooting
+
+## Issue: Requests Keep Timing Out
+
+**Symptoms:**
+- "Request timeout" errors
+- Operations never complete
+
+**Solutions:**
+```{r}
+# Increase timeout
+rb_config(timeout = 300)
+
+# Check network connection
+check_ribits_connection(verbose = TRUE)
+```
+
+## Issue: Rate Limit Errors (429)
+
+**Symptoms:**
+- "Rate limit exceeded" errors
+- 429 HTTP status codes
+
+**Solutions:**
+```{r}
+# Reduce rate limit
+rb_config(rate_limit = 2)
+
+# Check current failures
+rb_network_failures()
+```
+
+## Issue: Stale Cached Data
+
+**Symptoms:**
+- Data doesn't update when expected
+- Missing recent transactions
+
+**Solutions:**
+```{r}
+# Clear cache manually
+rb_clear_cache()
+
+# Or reduce cache age
+rb_config(cache_max_age_days = 1)
+
+# Or disable cache for this query
+banks <- ribits(state = "CA", cache = FALSE)
+```
+
+## Issue: Name Matching Failures
+
+**Symptoms:**
+- Many banks have NA bank_id
+- "Could not match name" warnings
+
+**Solutions:**
+```{r}
+# Clear and rebuild name lookup cache
+rb_clear_cache("lookup")
+
+# Rebuild with fresh API data
+lookup <- rb_build_name_lookup(include_csv = FALSE, cache = FALSE)
+
+# Check for specific bank
+rb_match_names(
+  data.frame(name = "My Bank Name"),
+  lookup,
+  name_col = "name"
+)
+```
+
+## Issue: Inconsistent Data Quality
+
+**Symptoms:**
+- Different values across sources
+- Unexpected NAs or discrepancies
+
+**Solutions:**
+```{r}
+# Diagnose the data
+banks <- ribits(state = "CA", transactions = "comprehensive")
+rb_diagnose(banks)
+
+# Adjust source priority if needed
+rb_config(source_priority = c("csv", "api", "epa"))
+
+# Disable auto-resolution to inspect conflicts
+rb_config(auto_resolve = FALSE)
+```
+
+# Monitoring & Diagnostics
+
+## Check Network Failures
+
+```{r}
+# View all failed requests from current session
+rb_network_failures()
+#> Network failures (last 50):
+#>   timestamp           | description                  | error
+#>   2024-01-15 10:23:45 | CSV download: transactions  | HTTP 503
+#>   2024-01-15 10:24:12 | API request: bank 123       | Timeout
+```
+
+## Test Connectivity
+
+```{r}
+# Test RIBITS API connection
+check_ribits_connection(verbose = TRUE)
+#> ✔ RIBITS API is reachable
+#> ✔ Response time: 234ms
+
+# Test specific bank
+rb_get("banks", id = "SAJ-2009-00123")
+```
+
+## View Configuration
+
+```{r}
+# See all settings
+rb_config()
+#> RIBITSr Configuration:
+#>   Network & Reliability:
+#>     - max_retries: 3
+#>     - retry_delay: 2 seconds
+#>     - timeout: 60 seconds
+#>     - rate_limit: 5 requests/second
+#>   Caching:
+#>     - use_persistent_cache: FALSE
+#>     - cache_max_age_days: 30
+#>   Data Quality:
+#>     - source_priority: api, csv, epa
+#>     - auto_resolve: TRUE
+```
+
+# Best Practices
+
+## 1. Use Persistent Cache for Repeated Analysis
+
+```{r}
+# At start of analysis script
+rb_config(use_persistent_cache = TRUE, cache_max_age_days = 7)
+```
+
+## 2. Conservative Rate Limiting in Production
+
+```{r}
+# Production environment
+rb_config(rate_limit = 3)  # Be a good API citizen
+```
+
+## 3. Set Configuration Once at Package Load
+
+In your project's startup script or `.Rprofile`:
+
+```{r}
+.First <- function() {
+  if (requireNamespace("RIBITSr", quietly = TRUE)) {
+    RIBITSr::rb_config(
+      max_retries = 5,
+      use_persistent_cache = TRUE,
+      cache_max_age_days = 7
+    )
+  }
+}
+```
+
+## 4. Use Environment Variables for Portability
+
+Instead of hardcoding settings in scripts, use `.Renviron`:
+
+```bash
+# .Renviron
+RIBITS_USE_PERSISTENT_CACHE=true
+RIBITS_RATE_LIMIT=3
+```
+
+This makes your code portable across different environments.
+
+## 5. Clear Cache Periodically
+
+```{r}
+# Weekly maintenance
+rb_clear_cache()
+```
+
+Or rely on automatic cleanup:
+
+```{r}
+rb_config(cache_max_age_days = 7)
+```
+
+# Advanced Configuration
+
+## Debugging Network Issues
+
+Enable verbose output for debugging:
+
+```{r}
+# Enable verbose mode (internal setting)
+.network_options$verbose <- TRUE
+
+# Make requests
+banks <- ribits(state = "CA")
+#> → Downloading CSV: transactions_watershed
+#> → Progress: 1.2 MB / 3.4 MB [35%]
+#> ✔ Downloaded in 2.3s
+```
+
+## Custom Validation Thresholds
+
+Transaction validation automatically checks for suspicious values. Validation results are stored in metadata:
+
+```{r}
+result <- ribits(state = "CA", transactions = "comprehensive")
+
+# Check validation results
+result$.meta$validation
+#> $valid: TRUE
+#> $warnings: character(0)
+#> $stats:
+#>   - credit_col: "credit"
+#>   - credit_range: min=0.01, max=5432.10
+#>   - source_breakdown: csv_watershed=1234, api=456, csv_ledger=789
+```
+
+## Error Classification
+
+RIBITSr automatically classifies errors as retryable or permanent:
+
+- **Retryable:** Network errors, timeouts, 5xx server errors, 429 rate limit
+- **Permanent:** 404 not found, 401 unauthorized, 403 forbidden, other 4xx errors
+
+This is handled automatically by the retry system.
+
+# Summary
+
+RIBITSr's configuration system provides:
+
+- **Flexible network settings** for different connectivity scenarios
+- **Smart caching** with session-only or persistent options
+- **Data quality controls** for source prioritization
+- **Environment variable support** for reproducible workflows
+- **Automatic retry and error handling** for reliability
+
+For most users, the defaults work well. Adjust settings based on your specific needs:
+
+- **Unreliable network?** → Increase retries and timeout
+- **Daily workflows?** → Enable persistent cache
+- **Bulk extraction?** → Conservative rate limiting + persistent cache
+- **Production?** → Environment variables + persistent cache
+
+For help with specific issues, see the Troubleshooting section or file an issue on GitHub.
