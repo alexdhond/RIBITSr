@@ -549,3 +549,343 @@
   # Could not parse - return NA
   as.Date(NA)
 }
+
+
+# =============================================================================
+# MANUAL RESOLUTION FUNCTIONS
+# =============================================================================
+
+#' Manually resolve a specific discrepancy
+#'
+#' @description
+#' Override auto-harmonization for a specific bank and field by manually
+#' selecting which source to trust. This is useful when you know the correct
+#' value and want to override the automatic resolution logic.
+#'
+#' @param data A ribits_data object with discrepancies
+#' @param bank_id Bank ID to resolve
+#' @param field Field name to resolve
+#' @param source Source to trust: "api", "csv", or "epa"
+#' @param value Optional: Specify exact value to use (overrides source selection)
+#' @param save Save this override preference for future sessions? Default FALSE.
+#'
+#' @return Updated ribits_data object with manual resolution applied
+#' @export
+#'
+#' @examples
+#' \dontrun{
+#' ca <- ribits(state = "CA")
+#'
+#' # Trust API value for total_credits
+#' ca <- rb_resolve(ca,
+#'   bank_id = "SAC-001",
+#'   field = "total_credits",
+#'   source = "api"
+#' )
+#'
+#' # Specify exact value
+#' ca <- rb_resolve(ca,
+#'   bank_id = "SAC-001",
+#'   field = "total_credits",
+#'   value = 150.5
+#' )
+#'
+#' # Save override for future sessions
+#' ca <- rb_resolve(ca,
+#'   bank_id = "SAC-001",
+#'   field = "total_credits",
+#'   source = "csv",
+#'   save = TRUE
+#' )
+#' }
+rb_resolve <- function(data, bank_id, field, source = NULL, value = NULL, save = FALSE) {
+
+  # Validate inputs
+  if (missing(bank_id) || is.null(bank_id)) {
+    cli::cli_abort("bank_id is required")
+  }
+
+  if (missing(field) || is.null(field)) {
+    cli::cli_abort("field is required")
+  }
+
+  if (is.null(source) && is.null(value)) {
+    cli::cli_abort("Either source or value must be specified")
+  }
+
+  if (!is.null(source)) {
+    valid_sources <- c("api", "csv", "epa", "ribits_api", "ribits_csv", "epa_arcgis")
+    if (!source %in% valid_sources) {
+      cli::cli_abort("source must be one of: {paste(c('api', 'csv', 'epa'), collapse = ', ')}")
+    }
+  }
+
+  # Find the discrepancy
+  disc <- data$.meta$discrepancies
+  resolutions <- data$.meta$harmonization_resolutions
+
+  # Check unresolved discrepancies first
+  matching_disc <- NULL
+  if (!is.null(disc) && nrow(disc) > 0) {
+    matching_disc <- disc |>
+      dplyr::filter(.data$bank_id == !!bank_id, .data$field == !!field)
+  }
+
+  # Check auto-resolved discrepancies
+  matching_res <- NULL
+  if (!is.null(resolutions) && nrow(resolutions) > 0) {
+    matching_res <- resolutions |>
+      dplyr::filter(.data$bank_id == !!bank_id, .data$field == !!field)
+  }
+
+  if ((is.null(matching_disc) || nrow(matching_disc) == 0) &&
+      (is.null(matching_res) || nrow(matching_res) == 0)) {
+    cli::cli_alert_warning("No discrepancy found for bank {bank_id}, field {field}")
+    return(data)
+  }
+
+  # Get current values from all sources
+  current_values <- .get_source_values(matching_disc, matching_res, bank_id, field)
+
+  # Show before state
+  cli::cli_h2("Manual Resolution: {bank_id} - {field}")
+  cli::cli_text("")
+  cli::cli_text("Current values:")
+  cli::cli_text("  API: {current_values$api}")
+  cli::cli_text("  CSV: {current_values$csv}")
+  cli::cli_text("  EPA: {current_values$epa}")
+  cli::cli_text("")
+
+  # Determine new value
+  if (!is.null(value)) {
+    # User specified exact value
+    new_value <- value
+    chosen_source <- "manual"
+    cli::cli_alert_info("Using manually specified value: {new_value}")
+  } else {
+    # User chose a source
+    new_value <- switch(source,
+      api = current_values$api,
+      ribits_api = current_values$api,
+      csv = current_values$csv,
+      ribits_csv = current_values$csv,
+      epa = current_values$epa,
+      epa_arcgis = current_values$epa,
+      NA
+    )
+
+    if (is.na(new_value)) {
+      cli::cli_alert_warning("Source {source} has no value for this field")
+      return(data)
+    }
+
+    chosen_source <- source
+    cli::cli_alert_success("Using value from {source}: {new_value}")
+  }
+
+  # Update the data
+  if (!is.null(data$banks) && "bank_id" %in% names(data$banks)) {
+    bank_idx <- which(data$banks$bank_id == bank_id)
+
+    if (length(bank_idx) > 0 && field %in% names(data$banks)) {
+      old_value <- data$banks[[field]][bank_idx]
+      data$banks[[field]][bank_idx] <- new_value
+
+      cli::cli_text("")
+      cli::cli_alert_success("Updated {field}: {old_value} -> {new_value}")
+    }
+  }
+
+  # Track manual resolution in metadata
+  if (is.null(data$.meta$manual_resolutions)) {
+    data$.meta$manual_resolutions <- tibble::tibble()
+  }
+
+  manual_resolution <- tibble::tibble(
+    bank_id = bank_id,
+    field = field,
+    api_value = as.character(current_values$api),
+    csv_value = as.character(current_values$csv),
+    epa_value = as.character(current_values$epa),
+    chosen_value = as.character(new_value),
+    chosen_source = chosen_source,
+    timestamp = as.character(Sys.time()),
+    saved = save
+  )
+
+  data$.meta$manual_resolutions <- dplyr::bind_rows(
+    data$.meta$manual_resolutions,
+    manual_resolution
+  )
+
+  # Remove from unresolved discrepancies if it was there
+  if (!is.null(data$.meta$discrepancies) && nrow(data$.meta$discrepancies) > 0) {
+    data$.meta$discrepancies <- data$.meta$discrepancies |>
+      dplyr::filter(!(.data$bank_id == !!bank_id & .data$field == !!field))
+  }
+
+  # Save preference if requested
+  if (save) {
+    .save_manual_resolution_preference(bank_id, field, chosen_source, new_value)
+    cli::cli_alert_info("Override preference saved for future sessions")
+  }
+
+  cli::cli_text("")
+  cli::cli_text("Use {.code resolutions(data)} to view all resolutions")
+
+  data
+}
+
+
+#' Get source values for a specific bank and field
+#' @keywords internal
+.get_source_values <- function(matching_disc, matching_res, bank_id, field) {
+
+  api_val <- NA
+  csv_val <- NA
+  epa_val <- NA
+
+  # Extract from discrepancies
+  if (!is.null(matching_disc) && nrow(matching_disc) > 0) {
+    for (i in seq_len(nrow(matching_disc))) {
+      row <- matching_disc[i, ]
+
+      if (row$source1 == "api" || row$source1 == "ribits_api") {
+        api_val <- row$value1
+      } else if (row$source1 == "csv" || row$source1 == "ribits_csv") {
+        csv_val <- row$value1
+      } else if (row$source1 == "epa" || row$source1 == "epa_arcgis") {
+        epa_val <- row$value1
+      }
+
+      if (row$source2 == "api" || row$source2 == "ribits_api") {
+        api_val <- row$value2
+      } else if (row$source2 == "csv" || row$source2 == "ribits_csv") {
+        csv_val <- row$value2
+      } else if (row$source2 == "epa" || row$source2 == "epa_arcgis") {
+        epa_val <- row$value2
+      }
+    }
+  }
+
+  # Extract from resolutions
+  if (!is.null(matching_res) && nrow(matching_res) > 0) {
+    for (i in seq_len(nrow(matching_res))) {
+      row <- matching_res[i, ]
+
+      if (row$source1 == "api" || row$source1 == "ribits_api") {
+        api_val <- row$value1
+      } else if (row$source1 == "csv" || row$source1 == "ribits_csv") {
+        csv_val <- row$value1
+      } else if (row$source1 == "epa" || row$source1 == "epa_arcgis") {
+        epa_val <- row$value1
+      }
+
+      if (row$source2 == "api" || row$source2 == "ribits_api") {
+        api_val <- row$value2
+      } else if (row$source2 == "csv" || row$source2 == "ribits_csv") {
+        csv_val <- row$value2
+      } else if (row$source2 == "epa" || row$source2 == "epa_arcgis") {
+        epa_val <- row$value2
+      }
+    }
+  }
+
+  list(
+    api = api_val,
+    csv = csv_val,
+    epa = epa_val
+  )
+}
+
+
+#' Save manual resolution preference for future sessions
+#' @keywords internal
+.save_manual_resolution_preference <- function(bank_id, field, source, value) {
+
+  # Get or create preferences file
+  pref_file <- file.path(tools::R_user_dir("RIBITSr", "config"), "manual_resolutions.rds")
+
+  # Create directory if needed
+  pref_dir <- dirname(pref_file)
+  if (!dir.exists(pref_dir)) {
+    dir.create(pref_dir, recursive = TRUE)
+  }
+
+  # Load existing preferences
+  if (file.exists(pref_file)) {
+    prefs <- readRDS(pref_file)
+  } else {
+    prefs <- tibble::tibble(
+      bank_id = character(),
+      field = character(),
+      source = character(),
+      value = character(),
+      timestamp = character()
+    )
+  }
+
+  # Add or update preference
+  new_pref <- tibble::tibble(
+    bank_id = bank_id,
+    field = field,
+    source = source,
+    value = as.character(value),
+    timestamp = as.character(Sys.time())
+  )
+
+  # Remove existing preference for this bank-field combination
+  prefs <- prefs |>
+    dplyr::filter(!(.data$bank_id == !!bank_id & .data$field == !!field))
+
+  # Add new preference
+  prefs <- dplyr::bind_rows(prefs, new_pref)
+
+  # Save
+  saveRDS(prefs, pref_file)
+}
+
+
+#' Load saved manual resolution preferences
+#' @keywords internal
+.load_manual_resolution_preferences <- function() {
+
+  pref_file <- file.path(tools::R_user_dir("RIBITSr", "config"), "manual_resolutions.rds")
+
+  if (file.exists(pref_file)) {
+    readRDS(pref_file)
+  } else {
+    tibble::tibble(
+      bank_id = character(),
+      field = character(),
+      source = character(),
+      value = character(),
+      timestamp = character()
+    )
+  }
+}
+
+
+#' Clear all saved manual resolution preferences
+#'
+#' @return Invisibly returns TRUE if successful
+#' @export
+#'
+#' @examples
+#' \dontrun{
+#' # Clear all saved override preferences
+#' rb_clear_manual_resolutions()
+#' }
+rb_clear_manual_resolutions <- function() {
+
+  pref_file <- file.path(tools::R_user_dir("RIBITSr", "config"), "manual_resolutions.rds")
+
+  if (file.exists(pref_file)) {
+    file.remove(pref_file)
+    cli::cli_alert_success("Cleared all saved manual resolution preferences")
+  } else {
+    cli::cli_alert_info("No saved manual resolution preferences found")
+  }
+
+  invisible(TRUE)
+}

@@ -2,6 +2,55 @@
 # Transaction harmonization and merging logic
 # Split from R/harmonize-transactions.R (644 lines → focused modules)
 
+#' Convert transaction field types to proper classes
+#'
+#' Ensures dates are Date objects, numeric fields are numeric, etc.
+#'
+#' @param transactions Transaction data frame
+#' @return Transactions with proper field types
+#' @keywords internal
+#' @noRd
+.convert_transaction_types <- function(transactions) {
+  if (is.null(transactions) || nrow(transactions) == 0) {
+    return(transactions)
+  }
+
+  # Convert transaction_date to Date (if present)
+  if ("transaction_date" %in% names(transactions)) {
+    if (is.character(transactions$transaction_date)) {
+      # Parse character dates (MM/DD/YYYY format most common from CSV)
+      transactions$transaction_date <- lubridate::mdy(transactions$transaction_date)
+    } else if (inherits(transactions$transaction_date, c("POSIXct", "POSIXlt"))) {
+      # Convert POSIX to Date
+      transactions$transaction_date <- as.Date(transactions$transaction_date)
+    }
+  }
+
+  # Convert permit_auth_date to Date (if present)
+  if ("permit_auth_date" %in% names(transactions)) {
+    if (is.character(transactions$permit_auth_date)) {
+      transactions$permit_auth_date <- lubridate::mdy(transactions$permit_auth_date)
+    } else if (inherits(transactions$permit_auth_date, c("POSIXct", "POSIXlt"))) {
+      transactions$permit_auth_date <- as.Date(transactions$permit_auth_date)
+    }
+  }
+
+  # Convert numeric fields to proper numeric type
+  if ("credits" %in% names(transactions)) {
+    if (is.character(transactions$credits)) {
+      transactions$credits <- as.numeric(transactions$credits)
+    }
+  }
+
+  # Standardize bank_id to character for consistency
+  if ("bank_id" %in% names(transactions)) {
+    transactions$bank_id <- as.character(transactions$bank_id)
+  }
+
+  transactions
+}
+
+
 #' Three-way harmonization of transaction data
 #'
 #' Merges transactions from watershed CSV (foundation), API ledger (gap-filling),
@@ -19,13 +68,14 @@
   # Start with whichever source has data
   if (is.null(watershed_txns) || nrow(watershed_txns) == 0) {
     if (is.null(api_ledger) || nrow(api_ledger) == 0) {
-      return(csv_ledger)
+      return(.convert_transaction_types(csv_ledger))
     }
     if (is.null(csv_ledger) || nrow(csv_ledger) == 0) {
-      return(api_ledger)
+      return(.convert_transaction_types(api_ledger))
     }
     # Fall back to 2-way merge if no watershed
-    return(.harmonize_transactions(api_ledger, csv_ledger, priority = "csv"))
+    merged <- .harmonize_transactions(api_ledger, csv_ledger, priority = "csv")
+    return(.convert_transaction_types(merged))
   }
 
   # STEP 1: Normalize all sources using column registry
@@ -152,6 +202,9 @@
 
   # STEP 7: Deduplicate transactions
   unified <- .deduplicate_transactions(unified)
+
+  # STEP 8: Convert field types to proper classes
+  unified <- .convert_transaction_types(unified)
 
   unified
 }

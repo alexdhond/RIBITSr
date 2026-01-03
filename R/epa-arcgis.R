@@ -21,6 +21,119 @@ EPA_LAYERS <- list(
   usace_districts = 12
 )
 
+#' Get EPA ArcGIS Layer Metadata (Internal)
+#'
+#' Fetches layer metadata from EPA ArcGIS, including lastEditDate.
+#' This is useful for tracking when the EPA data was last updated.
+#'
+#' @param layer Character. Layer name (e.g., "approved_banks")
+#' @return A list with layer metadata, or NULL if query fails
+#' @keywords internal
+#' @noRd
+.get_epa_layer_metadata <- function(layer) {
+  if (!layer %in% names(EPA_LAYERS)) {
+    return(NULL)
+  }
+  
+  layer_id <- EPA_LAYERS[[layer]]
+  url <- paste0(EPA_ARCGIS_BASE, "/", layer_id, "?f=json")
+  
+  tryCatch({
+    resp <- httr2::request(url) |>
+      httr2::req_timeout(10) |>
+      httr2::req_perform()
+    
+    if (httr2::resp_status(resp) == 200) {
+      meta <- jsonlite::fromJSON(httr2::resp_body_string(resp))
+      
+      # Extract key metadata
+      list(
+        layer_name = meta$name %||% layer,
+        layer_id = layer_id,
+        last_edit_date = if (!is.null(meta$editingInfo$lastEditDate)) {
+          # Convert epoch milliseconds to POSIXct
+          as.POSIXct(meta$editingInfo$lastEditDate / 1000, origin = "1970-01-01", tz = "UTC")
+        } else {
+          NA
+        },
+        feature_count = meta$maxRecordCount %||% NA,
+        geometry_type = meta$geometryType %||% NA,
+        source = "EPA ArcGIS",
+        query_time = Sys.time()
+      )
+    } else {
+      NULL
+    }
+  }, error = function(e) {
+    NULL
+  })
+}
+
+#' Get Data Source Freshness Summary (Internal)
+#'
+#' Collects metadata about when each data source was last updated.
+#' Stores this in the `.meta$source_freshness` attribute of ribits_data objects.
+#'
+#' @param sources Character vector of sources used ("api", "epa", "csv")
+#' @param csv_files List of CSV files downloaded with their timestamps
+#' @return A tibble with source freshness information
+#' @keywords internal
+#' @noRd
+.collect_source_freshness <- function(sources = c("api", "epa", "csv"), csv_files = list()) {
+  freshness <- list()
+  
+  # EPA layers (if used)
+  if ("epa" %in% sources) {
+    # Check key EPA layers
+    key_layers <- c("approved_banks", "bank_footprints", "bank_service_areas")
+    for (layer in key_layers) {
+      meta <- .get_epa_layer_metadata(layer)
+      if (!is.null(meta)) {
+        freshness[[paste0("epa_", layer)]] <- tibble::tibble(
+          source = "EPA ArcGIS",
+          layer = layer,
+          last_updated = meta$last_edit_date,
+          queried_at = meta$query_time
+        )
+      }
+    }
+  }
+  
+  # CSV files (if downloaded)
+  if (length(csv_files) > 0) {
+    for (name in names(csv_files)) {
+      file_info <- csv_files[[name]]
+      freshness[[paste0("csv_", name)]] <- tibble::tibble(
+        source = "CSV Download",
+        layer = name,
+        last_updated = file_info$download_time %||% file_info$mtime,
+        queried_at = Sys.time()
+      )
+    }
+  }
+  
+  # API (no last-updated metadata available)
+  if ("api" %in% sources) {
+    freshness[["api"]] <- tibble::tibble(
+      source = "RIBITS API",
+      layer = "bank_site_list",
+      last_updated = NA_POSIXct_,
+      queried_at = Sys.time()
+    )
+  }
+  
+  if (length(freshness) > 0) {
+    dplyr::bind_rows(freshness)
+  } else {
+    tibble::tibble(
+      source = character(),
+      layer = character(),
+      last_updated = as.POSIXct(character()),
+      queried_at = as.POSIXct(character())
+    )
+  }
+}
+
 #' Query EPA ArcGIS MapServer for RIBITS data
 #'
 #' Fetches spatial data from EPA's ArcGIS MapServer, which mirrors RIBITS

@@ -12,6 +12,11 @@ LOOKUP_SOURCE_WEIGHTS <- c(
   csv_notices = 0.4
 )
 
+# Package-level cache environment for unmatched names (for rb_get_unmatched())
+# Using an environment to avoid locked binding issues during devtools::load_all()
+.ribits_cache_env <- new.env(parent = emptyenv())
+.ribits_cache_env$unmatched <- NULL
+
 #' Build a name-to-ID lookup table
 #'
 #' Creates a lookup table mapping bank/program names to their IDs using
@@ -104,11 +109,26 @@ rb_build_name_lookup <- function(include_csv = TRUE,
 
   if (!force_refresh && file.exists(cache_file)) {
     cache_age <- difftime(Sys.time(), file.mtime(cache_file), units = "days")
-
-    if (cache_age < max_age_days) {
+    
+    # Load cached data to check version
+    cached_lookup <- tryCatch(readRDS(cache_file), error = function(e) NULL)
+    
+    # Get current package version
+    pkg_version <- tryCatch(
+      as.character(utils::packageVersion("RIBITSr")),
+      error = function(e) "0.0.0"
+    )
+    
+    # Get cached package version (if stored)
+    cache_version <- attr(cached_lookup, "package_version") %||% "0.0.0"
+    
+    # Version-aware invalidation: refresh if package is newer than cache
+    if (!is.null(cached_lookup) && pkg_version > cache_version) {
+      cli::cli_alert_info("Package updated ({cache_version} -> {pkg_version}), refreshing cache...")
+      force_refresh <- TRUE
+    } else if (cache_age < max_age_days && !is.null(cached_lookup)) {
       cli::cli_alert_info("Using cached lookup ({round(cache_age, 1)} days old)")
-      lookup <- readRDS(cache_file)
-      return(lookup)
+      return(cached_lookup)
     } else {
       cli::cli_alert_info("Cache is stale ({round(cache_age, 1)} days old), refreshing...")
     }
@@ -143,6 +163,13 @@ rb_build_name_lookup <- function(include_csv = TRUE,
 
   # Step 4: Save to user cache (if we got fresh data successfully)
   if (!inherits(lookup, "error") && !is.null(attr(lookup, "fetch_date"))) {
+    # Store package version for version-aware cache invalidation
+    pkg_version <- tryCatch(
+      as.character(utils::packageVersion("RIBITSr")),
+      error = function(e) "0.0.0"
+    )
+    attr(lookup, "package_version") <- pkg_version
+    
     dir.create(dirname(cache_file), recursive = TRUE, showWarnings = FALSE)
     saveRDS(lookup, cache_file)
     cli::cli_alert_success("Cached to: {cache_file}")
@@ -576,11 +603,75 @@ rb_match_names <- function(data,
   # Step 1: Exact match on normalized names
   cli::cli_progress_step("Matching names...")
   
+  # Join to get ALL potential matches (a name may match multiple bank_ids)
   exact_matches <- data |>
     dplyr::left_join(
-      lookup |> dplyr::select(name_normalized, bank_id_exact = bank_id),
-      by = c(".name_normalized" = "name_normalized")
+      lookup |> dplyr::select(name_normalized, bank_id_exact = bank_id, 
+                               lookup_state = state, lookup_year = year_established),
+      by = c(".name_normalized" = "name_normalized"),
+      relationship = "many-to-many"  # Allow multiple matches
     )
+  
+  # Step 1b: Smart Disambiguation for ambiguous matches
+  # If a name matches multiple IDs, use secondary signals (state, year)
+  if (!is.null(state_col) || !is.null(year_col)) {
+    # Count matches per original row
+    exact_matches <- exact_matches |>
+      dplyr::group_by(dplyr::across(-c(bank_id_exact, lookup_state, lookup_year))) |>
+      dplyr::mutate(.n_matches = dplyr::n()) |>
+      dplyr::ungroup()
+    
+    # For rows with multiple matches, try to disambiguate
+    ambiguous_idx <- which(exact_matches$.n_matches > 1)
+    if (length(ambiguous_idx) > 0) {
+      cli::cli_alert_info("Disambiguating {length(unique(exact_matches$.name_normalized[ambiguous_idx]))} ambiguous names...")
+      
+      # State-based disambiguation
+      if (!is.null(state_col) && state_col %in% names(exact_matches)) {
+        exact_matches <- exact_matches |>
+          dplyr::mutate(
+            .state_match = !is.na(.data[[state_col]]) & !is.na(lookup_state) &
+              stringr::str_detect(lookup_state, .data[[state_col]])
+          )
+      } else {
+        exact_matches$.state_match <- FALSE
+      }
+      
+      # Year-based disambiguation
+      if (!is.null(year_col) && year_col %in% names(exact_matches)) {
+        exact_matches <- exact_matches |>
+          dplyr::mutate(
+            .year_match = !is.na(.data[[year_col]]) & !is.na(lookup_year) &
+              abs(as.numeric(.data[[year_col]]) - as.numeric(lookup_year)) <= 1
+          )
+      } else {
+        exact_matches$.year_match <- FALSE
+      }
+      
+      # Score each candidate: prefer state match > year match > first occurrence
+      exact_matches <- exact_matches |>
+        dplyr::mutate(
+          .disambig_score = as.integer(.state_match) * 10 + as.integer(.year_match) * 5
+        ) |>
+        dplyr::group_by(dplyr::across(-c(bank_id_exact, lookup_state, lookup_year, 
+                                          .state_match, .year_match, .disambig_score, .n_matches))) |>
+        dplyr::arrange(dplyr::desc(.disambig_score)) |>
+        dplyr::slice(1) |>  # Keep best match per original row
+        dplyr::ungroup() |>
+        dplyr::select(-dplyr::any_of(c(".state_match", ".year_match", ".disambig_score", ".n_matches",
+                                        "lookup_state", "lookup_year")))
+    } else {
+      exact_matches <- exact_matches |>
+        dplyr::select(-dplyr::any_of(c("lookup_state", "lookup_year")))
+    }
+  } else {
+    # No disambiguation columns provided - just take first match
+    exact_matches <- exact_matches |>
+      dplyr::group_by(dplyr::across(-c(bank_id_exact, lookup_state, lookup_year))) |>
+      dplyr::slice(1) |>
+      dplyr::ungroup() |>
+      dplyr::select(-dplyr::any_of(c("lookup_state", "lookup_year")))
+  }
   
   # Initialize fuzzy columns
   exact_matches$bank_id_fuzzy <- NA_integer_
@@ -589,7 +680,7 @@ rb_match_names <- function(data,
   n_exact <- sum(!is.na(exact_matches$bank_id_exact))
   cli::cli_alert_success("Exact matches: {n_exact}/{nrow(data)}")
   
-  # Step 2: Fuzzy matching for unmatched rows (VECTORIZED for 10-50x speedup)
+  # Step 2: Fuzzy matching for unmatched rows (with optional BLOCKING for efficiency)
   if (fuzzy && n_exact < nrow(data)) {
     unmatched_idx <- which(is.na(exact_matches$bank_id_exact))
 
@@ -601,24 +692,54 @@ rb_match_names <- function(data,
       valid_names <- unmatched_names[valid_mask]
 
       if (length(valid_names) > 0) {
-        # Vectorized similarity computation
-        # stringdist::stringsimmatrix computes ALL similarities at once in C code
-        # Much faster than sapply loop: O(n*m) in C vs O(n*m) in R
-        sim_matrix <- stringdist::stringsimmatrix(
-          valid_names,
-          lookup$name_normalized,
-          method = "jw"
-        )
+        # BLOCKING: If state_col is provided, match within state blocks for efficiency
+        if (!is.null(state_col) && state_col %in% names(exact_matches)) {
+          data_states <- exact_matches[[state_col]][valid_idx]
+          
+          # Build state-based blocks
+          for (i in seq_along(valid_idx)) {
+            idx <- valid_idx[i]
+            name <- valid_names[i]
+            data_state <- data_states[i]
+            
+            # Filter lookup to same state (if available)
+            if (!is.na(data_state) && nchar(data_state) > 0) {
+              block_lookup <- lookup |>
+                dplyr::filter(is.na(state) | stringr::str_detect(state, data_state))
+            } else {
+              block_lookup <- lookup
+            }
+            
+            if (nrow(block_lookup) == 0) block_lookup <- lookup  # Fallback to full
+            
+            # Compute similarity within block
+            sim_scores <- stringdist::stringsim(name, block_lookup$name_normalized, method = "jw")
+            best_idx <- which.max(sim_scores)
+            best_score <- max(sim_scores)
+            
+            if (best_score >= threshold) {
+              exact_matches$bank_id_fuzzy[idx] <- block_lookup$bank_id[best_idx]
+              exact_matches$fuzzy_score[idx] <- best_score
+            }
+          }
+        } else {
+          # No blocking - use full vectorized matching (original fast path)
+          sim_matrix <- stringdist::stringsimmatrix(
+            valid_names,
+            lookup$name_normalized,
+            method = "jw"
+          )
 
-        # Find best match for each row
-        best_indices <- apply(sim_matrix, 1, which.max)
-        best_scores <- apply(sim_matrix, 1, max)
+          # Find best match for each row
+          best_indices <- apply(sim_matrix, 1, which.max)
+          best_scores <- apply(sim_matrix, 1, max)
 
-        # Apply threshold and assign matches
-        matches <- ifelse(best_scores >= threshold, lookup$bank_id[best_indices], NA)
+          # Apply threshold and assign matches
+          matches <- ifelse(best_scores >= threshold, lookup$bank_id[best_indices], NA)
 
-        exact_matches$bank_id_fuzzy[valid_idx] <- matches
-        exact_matches$fuzzy_score[valid_idx] <- best_scores
+          exact_matches$bank_id_fuzzy[valid_idx] <- matches
+          exact_matches$fuzzy_score[valid_idx] <- best_scores
+        }
       }
 
       n_fuzzy <- sum(!is.na(exact_matches$bank_id_fuzzy))
@@ -644,6 +765,18 @@ rb_match_names <- function(data,
       )
     ) |>
     dplyr::select(-bank_id_exact, -bank_id_fuzzy, -fuzzy_score, -.name_normalized)
+  
+  # Step 3: Cache unmatched names for user review
+  unmatched_names <- result |>
+    dplyr::filter(match_quality == "unmatched") |>
+    dplyr::select(dplyr::any_of(c(name_col, state_col, year_col))) |>
+    dplyr::distinct()
+  
+  if (nrow(unmatched_names) > 0) {
+    # Store in package-level cache for later retrieval
+    .ribits_cache_env$unmatched <- unmatched_names
+    cli::cli_alert_warning("{nrow(unmatched_names)} unmatched names cached. Use rb_get_unmatched() to review.")
+  }
   
   # Summary
   match_summary <- table(result$match_quality)
@@ -683,3 +816,34 @@ rb_clear_name_cache <- function() {
     invisible(FALSE)
   }
 }
+
+
+#' Get Unmatched Names from Last Match Operation
+#'
+#' Returns a tibble of bank names that failed to match during the last call
+#' to [rb_match_names()]. Useful for debugging and creating manual override files.
+#'
+#' @return A tibble with unmatched names and any available context (state, year)
+#' @export
+#' @examples
+#' \dontrun{
+#' # After running a match operation with some failures
+#' rb_match_names(my_data)
+#'
+#' # Review what didn't match
+#' unmatched <- rb_get_unmatched()
+#' print(unmatched)
+#'
+#' # Export for manual review
+#' readr::write_csv(unmatched, "unmatched_banks_for_review.csv")
+#' }
+rb_get_unmatched <- function() {
+  if (is.null(.ribits_cache_env$unmatched) || nrow(.ribits_cache_env$unmatched) == 0) {
+    cli::cli_alert_info("No unmatched names cached. Run rb_match_names() first.")
+    return(tibble::tibble())
+  }
+  
+  cli::cli_alert_success("Returning {nrow(.ribits_cache_env$unmatched)} unmatched names from last match operation.")
+  .ribits_cache_env$unmatched
+}
+

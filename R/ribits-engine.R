@@ -55,7 +55,9 @@
   result <- structure(
     list(
       banks = NULL,           # Summary with contact/credit columns
-      transactions = NULL,    # Unified transactions (if include_detailed_transactions=TRUE)
+      transactions = NULL,    # Unified transactions
+      credits = NULL,         # Credit classifications
+      notices = NULL,         # Public notices
       geometry = NULL,        # Unified spatial: centroids + footprints + service_areas
       .contacts = NULL,       # Detailed contacts (if include_detailed_contacts=TRUE)
       .meta = list(
@@ -67,11 +69,12 @@
           district = district,
           what = what,
           type = type,
-          sources_requested = sources,
+        sources_requested = sources,
           include_detailed_contacts = include_detailed_contacts,
           include_detailed_transactions = include_detailed_transactions
         ),
         sources = list(),
+        source_freshness = NULL,  # Will be populated with .collect_source_freshness()
         discrepancies = tibble::tibble(),
         timing = list(started = start_time)
       )
@@ -88,11 +91,17 @@
 
   # 1. API
   banks_ribits_data <- if (use_api) {
-      .fetch_ribits_api_data(type, bank_ids, state, district, quietly)
+      .fetch_ribits_api_data(type, bank_ids, state, district, include_spatial, quietly)
   } else {
-      list(banks = NULL, contacts = NULL)
+      list(banks = NULL, contacts = NULL, geometry = NULL)
   }
   banks_ribits <- banks_ribits_data$banks
+  
+  # Store API geometry (merged later)
+  # geometry is now a list with 'footprints' and 'service_areas' elements
+  if (!is.null(banks_ribits_data$geometry) && is.list(banks_ribits_data$geometry)) {
+      result$geometry <- banks_ribits_data$geometry
+  }
 
   # Store API contacts (temporary, will be finalized later)
   if (!is.null(banks_ribits_data$contacts) && nrow(banks_ribits_data$contacts) > 0) {
@@ -209,6 +218,10 @@
 
   if (!quietly) cli::cli_alert_success("Processing {length(query_ids)} banks...")
 
+  # Step 2b: API Hydration (REMOVED - Optimised into Step 1)
+  # Original hydration logic is now handled by .fetch_ribits_api_data
+  # which fetches detailed data including spatial attributes in the first pass.
+
   # ==========================================================================
   # Step 3: Summaries (Contacts, Credits, etc.)
   # ==========================================================================
@@ -231,6 +244,15 @@
     }
   }
   credit_summary <- .summarize_credits(credit_class_detailed)
+
+  # Pivot wide for Master Summary (StreamCat-style metrics)
+  if (!is.null(credit_class_detailed) && nrow(credit_class_detailed) > 0) {
+    credit_wide <- .pivot_credits_wide(credit_class_detailed)
+    if (nrow(credit_wide) > 0) {
+      credit_summary <- dplyr::left_join(credit_summary, credit_wide, by = "bank_id")
+      if (!quietly) cli::cli_alert_success("Added wide credit metrics")
+    }
+  }
 
   # Releases & Notices
   credit_releases_summary <- NULL
@@ -320,12 +342,65 @@
   if (use_checkpoints && include_spatial) {
     .save_step_checkpoint(operation_id, result, step = 4, description = "pre_spatial")
   }
+  
+  # ==========================================================================
+  # Step 4b: Credits and Notices (always fetch for banks)
+  # ==========================================================================
+  if (use_csv && type == "banks") {
+    cache_dir <- if (cache) file.path(tempdir(), "ribits_cache") else tempdir()
+    
+    # Fetch credit classifications
+    if (!quietly) cli::cli_progress_step("Fetching credit classifications...")
+    result$credits <- tryCatch({
+      credit_data <- .fetch_csv_with_bank_id("credit_classification", query_ids, cache, quietly)
+      if (!is.null(credit_data) && nrow(credit_data) > 0) {
+        # Normalize and return as-is (long format, one row per bank x classification)
+        credit_data <- .normalize_columns(credit_data)
+        if (!quietly) cli::cli_alert_success("Retrieved {nrow(credit_data)} credit classification records")
+        credit_data
+      } else NULL
+    }, error = function(e) {
+      if (!quietly) cli::cli_alert_warning("Credit classifications fetch failed: {e$message}")
+      NULL
+    })
+    
+    # Fetch public notices
+    if (!quietly) cli::cli_progress_step("Fetching public notices...")
+    result$notices <- tryCatch({
+      notice_data <- .fetch_csv_with_bank_id("public_notices", query_ids, cache, quietly)
+      if (!is.null(notice_data) && nrow(notice_data) > 0) {
+        notice_data <- .normalize_columns(notice_data)
+        if (!quietly) cli::cli_alert_success("Retrieved {nrow(notice_data)} public notice records")
+        
+        # Add notice summary to banks if include_summaries
+        if (include_summaries && !is.null(result$banks) && nrow(result$banks) > 0) {
+          notice_summary <- .summarize_public_notices(notice_data)
+          if (!is.null(notice_summary) && nrow(notice_summary) > 0) {
+            result$banks <- dplyr::left_join(result$banks, notice_summary, by = "bank_id")
+            if (!quietly) cli::cli_alert_success("Added notice summaries")
+          }
+        }
+        
+        notice_data
+      } else NULL
+    }, error = function(e) {
+      if (!quietly) cli::cli_alert_warning("Public notices fetch failed: {e$message}")
+      NULL
+    })
+    
+    result$.meta$sources$credits <- if (!is.null(result$credits)) "credit_classification_csv" else NULL
+    result$.meta$sources$notices <- if (!is.null(result$notices)) "public_notices_csv" else NULL
+  }
 
   # ==========================================================================
   # Step 5: Spatial Data
   # ==========================================================================
   if (include_spatial) {
-    spatial_res <- .fetch_harmonized_spatial(query_ids, use_epa, use_api, quietly)
+    spatial_res <- .fetch_harmonized_spatial(
+        query_ids, use_epa, use_api, 
+        geometry_api = result$geometry, # Pass pre-fetched API geometry
+        quietly
+    )
 
     if (nrow(spatial_res$discrepancies) > 0) {
       result$.meta$discrepancies <- dplyr::bind_rows(result$.meta$discrepancies, spatial_res$discrepancies)
@@ -357,6 +432,60 @@
   # ==========================================================================
 
   if (!is.null(result$banks) && nrow(result$banks) > 0) {
+    # Ensure lat/lon columns exist by extracting from geometry if needed
+    if (!is.null(result$geometry) && "centroid" %in% names(result$geometry)) {
+        # The geometry object has columns: bank_id, bank_name, bank_status, centroid, footprint, service_area
+        # Extract coordinates from the centroid column (which is already a geometry column)
+
+        # First, set centroid as the active geometry to extract coordinates
+        geom_with_centroids <- result$geometry |>
+          dplyr::select(dplyr::any_of("bank_id"), "centroid")
+
+        # Extract coordinates from the centroid geometries
+        # Use st_set_geometry to make centroid the active geometry column
+        if (nrow(geom_with_centroids) > 0) {
+          geom_with_centroids <- sf::st_set_geometry(geom_with_centroids, "centroid")
+          coords_matrix <- sf::st_coordinates(geom_with_centroids)
+
+          coords <- geom_with_centroids |>
+            sf::st_drop_geometry() |>
+            dplyr::mutate(
+              longitude = coords_matrix[,1],
+              latitude = coords_matrix[,2]
+            ) |>
+            dplyr::select("bank_id", "latitude", "longitude")
+        } else {
+          coords <- tibble::tibble(bank_id = integer(), latitude = numeric(), longitude = numeric())
+        }
+        
+        # Merge into banks, filling gaps or overwriting if missing
+        # We use explicit suffixes to handle both cases (column exists or not)
+        result$banks <- result$banks |>
+          dplyr::left_join(coords, by = "bank_id", suffix = c(".old", ".new"))
+          
+        # Coalesce latitude
+        if ("latitude.new" %in% names(result$banks)) {
+            if ("latitude.old" %in% names(result$banks)) {
+                result$banks$latitude <- dplyr::coalesce(as.numeric(result$banks$latitude.new), as.numeric(result$banks$latitude.old))
+            } else {
+                result$banks$latitude <- as.numeric(result$banks$latitude.new)
+            }
+        }
+        
+        # Coalesce longitude
+        if ("longitude.new" %in% names(result$banks)) {
+            if ("longitude.old" %in% names(result$banks)) {
+                result$banks$longitude <- dplyr::coalesce(as.numeric(result$banks$longitude.new), as.numeric(result$banks$longitude.old))
+            } else {
+                result$banks$longitude <- as.numeric(result$banks$longitude.new)
+            }
+        }
+        
+        # Cleanup
+        result$banks <- result$banks |>
+          dplyr::select(-dplyr::matches("\\.old$|\\.new$"))
+    }
+
     result$banks <- .finalize_df(result$banks, type = "banks")
   }
   if (!is.null(result$transactions) && nrow(result$transactions) > 0) {
@@ -370,6 +499,12 @@
   result$.meta$timing$duration_secs <- as.numeric(
     difftime(result$.meta$timing$completed, start_time, units = "secs")
   )
+  
+  # Collect source freshness metadata (internal, for debugging data staleness)
+  result$.meta$source_freshness <- tryCatch(
+    .collect_source_freshness(sources = sources),
+    error = function(e) NULL
+  )
 
   if (!quietly) {
     cli::cli_h3("Summary")
@@ -377,6 +512,8 @@
     # Summary of what was fetched
     n_banks <- if (!is.null(result$banks)) nrow(result$banks) else 0
     n_transactions <- if (!is.null(result$transactions)) nrow(result$transactions) else 0
+    n_credits <- if (!is.null(result$credits)) nrow(result$credits) else 0
+    n_notices <- if (!is.null(result$notices)) nrow(result$notices) else 0
     n_contacts <- if (!is.null(result$.contacts)) nrow(result$.contacts) else 0
     n_geom <- if (!is.null(result$geometry)) nrow(result$geometry) else 0
 
@@ -385,7 +522,15 @@
     )
 
     if (n_transactions > 0) {
-      bullets <- c(bullets, "v" = "{n_transactions} transactions (unified)")
+      bullets <- c(bullets, "v" = "{n_transactions} transactions")
+    }
+    
+    if (n_credits > 0) {
+      bullets <- c(bullets, "v" = "{n_credits} credit classifications")
+    }
+    
+    if (n_notices > 0) {
+      bullets <- c(bullets, "v" = "{n_notices} public notices")
     }
 
     if (n_contacts > 0) {

@@ -2,16 +2,38 @@
 % Please edit documentation in R/harmonization-report.R
 \name{rb_export_discrepancies}
 \alias{rb_export_discrepancies}
-\title{Export discrepancies to CSV for manual review}
+\title{Export discrepancies to CSV or Excel for manual review}
 \usage{
-rb_export_discrepancies(data, file_path = "ribits_discrepancies.csv")
+rb_export_discrepancies(
+  data,
+  format = c("csv", "excel", "html"),
+  file_path = NULL
+)
 }
 \arguments{
 \item{data}{A ribits_data object}
 
-\item{file_path}{Path to save CSV file}
+\item{format}{Export format: "csv", "excel", or "html"}
+
+\item{file_path}{Path to save file. If NULL, auto-generates based on format.}
+}
+\value{
+Invisibly returns the discrepancies tibble
 }
 \description{
-Export discrepancies to CSV for manual review
+Export discrepancies to CSV or Excel for manual review
 }
-\keyword{internal}
+\examples{
+\dontrun{
+ca <- ribits(state = "CA")
+
+# Export to CSV
+rb_export_discrepancies(ca, format = "csv")
+
+# Export to Excel with multiple sheets
+rb_export_discrepancies(ca, format = "excel")
+
+# Export to HTML table
+rb_export_discrepancies(ca, format = "html", file_path = "discrepancies.html")
+}
+}

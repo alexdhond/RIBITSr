@@ -39,17 +39,19 @@ and lists columns.
 }
 \examples{
 \dontrun{
-# See all available data
-rb_info()
+# Discover what's available
+rb_info()  # Shows catalog of all data sources
 
-# Preview API data
+# Before downloading, explore the data
 rb_info("preview", source = "api", state = "OR")
 
-# List columns
-rb_info("columns", source = "epa")
+# See what columns you'll get
+rb_info("columns", source = "api")  # ~67 columns
 
-# Get details on specific source
-rb_info("api")
+# Most users just do:
+library(dplyr)
+ca <- ribits(state = "CA")  # Get everything
+ca$banks \%>\% glimpse()       # See what you got
 }
 }
 \keyword{internal}

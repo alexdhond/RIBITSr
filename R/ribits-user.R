@@ -34,8 +34,10 @@
 #' @param id Alternative for `ids` (for backward compatibility).
 #'
 #' @return A `ribits_data` object containing:
-#'   \item{banks/programs/umbrellas}{Summary data (tibble)}
-#'   \item{transactions}{Transaction/credit tracking data (tibble, banks only)}
+#'   \item{banks}{Summary data (tibble) - always included}
+#'   \item{transactions}{Transaction/credit tracking data (tibble, if detailed=TRUE)}
+#'   \item{credits}{Credit classifications by type (tibble, if detailed=TRUE)}
+#'   \item{notices}{Public notices (tibble, if detailed=TRUE)}
 #'   \item{geometry}{Spatial data including footprints and service areas (sf object)}
 #'   \item{.meta}{Metadata including sources used and any discrepancies}
 #'
@@ -48,6 +50,8 @@
 #' # Access the data
 #' ca$banks           # All bank attributes, all sources merged
 #' ca$transactions    # All transaction data (~85 columns)
+#' ca$credits         # Credit classifications (NEW)
+#' ca$notices         # Public notices (NEW)
 #' ca$geometry        # Spatial footprints and service areas
 #'
 #' # Filter with tidyverse
@@ -61,11 +65,6 @@
 #'
 #' # Get specific banks by ID
 #' my_banks <- ribits(ids = c(17, 100, 345))
-#'
-#' # For speed, reduce data:
-#' # - Basic transactions instead of comprehensive
-#' # - Skip spatial data
-#' fast <- ribits(state = "OR", transactions = "basic", spatial = FALSE)
 #' }
 ribits <- function(type = "banks",
                    state = NULL,
@@ -119,3 +118,149 @@ ribits <- function(type = "banks",
     include_summaries = include_summaries
   )
 }
+
+#' List Available Data Parameters
+#'
+#' @description
+#' Lists the available data columns and metrics that can be retrieved, similar to
+#' `StreamCatTools::sc_get_params()`. This helps users understand what data is available
+#' in the "Master Summary" and "Master Ledger" tables.
+#'
+#' @param type Data type to list parameters for ("banks", "transactions", "contacts")
+#'
+#' @return A tibble with column names and descriptions
+#' @export
+#' @examples
+#' rb_params("banks")
+#' rb_params("transactions")
+rb_params <- function(type = c("banks", "transactions", "contacts")) {
+  type <- match.arg(type)
+
+  # Get column order from registry
+  cols <- .order_columns(data.frame(), type = type)
+  col_names <- names(cols)
+
+  # Create description mapping (this could be moved to registry later)
+  descriptions <- c(
+    "bank_id" = "Primary unique identifier for the bank",
+    "bank_name" = "Official name of the mitigation bank",
+    "bank_status" = "Current approval status (Approved, Pending, Sold-Out, etc.)",
+    "total_available_credits" = "Total credits currently available for sale",
+    "total_released_credits" = "Total credits released by IRT",
+    "total_potential_credits" = "Total potential credits including unreleased",
+    "state_abbrev_list" = "State(s) where the bank operates",
+    "district" = "USACE District with oversight",
+    "centroid" = "Spatial point location (sf geometry)",
+    "footprint" = "Spatial polygon boundary (sf geometry)",
+    "service_area" = "Spatial service area polygon (sf geometry)",
+    "transaction_date" = "Date of credit transaction",
+    "credit_classification" = "Specific type of credit (e.g., Wetland, Stream)",
+    "primary_sponsor" = "Name of the bank sponsor organization"
+  )
+
+  tibble::tibble(
+    parameter = col_names,
+    description = descriptions[col_names] |> 
+      ifelse(is.na(.), "Standardized attribute", .),
+    type = type
+  )
+}
+
+#' Get RIBITS Data (StreamCat-style Wrapper)
+#'
+#' @description
+#' A simplified, text-based interface for retrieving data, designed to feel familiar
+#' to users of `StreamCatTools`. Uses a generic `aoi` (Area of Interest) argument
+#' to intelligently filter data.
+#'
+#' @param aoi Area of Interest. Can be:
+#'   - State abbreviation (e.g., "CA", "OR")
+#'   - USACE District name (e.g., "Portland", "Sacramento")
+#'   - Numeric Bank ID (e.g., 17)
+#' @param type Type of data: "banks" (default), "ilf", "umbrellas"
+#' @param x_coord Optional longitude (if searching by location - future feature)
+#' @param y_coord Optional latitude (if searching by location - future feature)
+#' @param state Optional state filter (explicit)
+#' @param ... Additional arguments passed to `ribits()`
+#'
+#' @return A `ribits_data` object
+#' @export
+#' @examples
+#' \dontrun{
+#' # Get data for California (aoi = state)
+#' ca <- rb_get_data(aoi = "CA")
+#'
+#' # Get data for Portland District (aoi = district)
+#' pd <- rb_get_data(aoi = "Portland")
+#'
+#' # Get specific bank (aoi = ID)
+#' bank <- rb_get_data(aoi = 17)
+#' }
+rb_get_data <- function(aoi = NULL, 
+                        type = "banks",
+                        x_coord = NULL, 
+                        y_coord = NULL,
+                        state = NULL,
+                        ...) {
+  
+  district <- NULL
+  ids <- NULL
+
+  # Intelligent AOI parsing
+  if (!is.null(aoi)) {
+    if (is.numeric(aoi)) {
+      ids <- aoi
+    } else if (is.character(aoi)) {
+      if (nchar(aoi) == 2) {
+        # Likely a state abbreviation
+        if (is.null(state)) state <- aoi
+      } else {
+        # Likely a district name
+        district <- aoi
+      }
+    }
+  }
+
+  # Delegate to main function
+  ribits(
+    type = type,
+    state = state,
+    district = district,
+    ids = ids,
+    ...
+  )
+}
+
+#' Get Master Summary Dataframe
+#'
+#' @description
+#' Convenience function to retrieve the "Master Summary" dataframe (one row per bank).
+#' Includes all harmonized attributes, flattened spatial data, and wide-form credit metrics.
+#'
+#' @param aoi Area of Interest (State, District, or Bank ID)
+#' @param ... Additional arguments passed to `ribits()`
+#'
+#' @return A tibble with one row per bank
+#' @export
+rb_get_summary <- function(aoi = NULL, ...) {
+  res <- rb_get_data(aoi = aoi, include_summaries = TRUE, ...)
+  res$banks
+}
+
+#' Get Master Ledger Dataframe
+#'
+#' @description
+#' Convenience function to retrieve the "Master Ledger" dataframe.
+#' Includes comprehensive transaction history from all sources (Watershed CSV + API + Ledger CSV).
+#'
+#' @param aoi Area of Interest (State, District, or Bank ID)
+#' @param ... Additional arguments passed to `ribits()`
+#'
+#' @return A tibble of transaction history
+#' @export
+rb_get_ledger <- function(aoi = NULL, ...) {
+  res <- rb_get_data(aoi = aoi, transactions = "comprehensive", ...)
+  res$transactions
+}
+
+

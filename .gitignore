@@ -9,3 +9,24 @@ agents
 .gemini
 ..Rcheck/
 *.tar.gz
+
+# Binary artifacts and temporary files
+*.rds
+*.html
+
+# Development/audit scripts in root directory
+audit_*.R
+analyze_*.R
+test_*.R
+check_*.R
+final_*.R
+
+# Temporary documentation/reports
+*_REPORT.md
+*_SUMMARY.md
+*_FINDINGS.md
+*_RESULTS.md
+CSV_ENDPOINT_REPORT.md
+IMPLEMENTATION_SUMMARY.md
+/doc/
+/Meta/

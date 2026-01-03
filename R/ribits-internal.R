@@ -4,7 +4,7 @@
 #' Fetch data from RIBITS API with standard handling
 #' @keywords internal
 #' @noRd
-.fetch_ribits_api_data <- function(type, bank_ids, state, district, quietly = FALSE) {
+.fetch_ribits_api_data <- function(type, bank_ids, state, district, include_spatial = FALSE, quietly = FALSE) {
   if (!quietly) cli::cli_progress_step("Querying RIBITS API...")
   
   tryCatch({
@@ -12,7 +12,7 @@
     bank_list <- rb_get(type, state = state, district = district)
     
     if (is.null(bank_list) || nrow(bank_list) == 0) {
-      return(list(banks = NULL, contacts = NULL))
+      return(list(banks = NULL, contacts = NULL, geometry = NULL))
     }
     
     # Normalize columns immediately
@@ -21,7 +21,7 @@
     # Check for bank_id
     if (!.col_exists(bank_list, "bank_id")) {
       cli::cli_alert_warning("No bank_id column found in API list")
-      return(list(banks = NULL, contacts = NULL))
+      return(list(banks = NULL, contacts = NULL, geometry = NULL))
     }
     
     list_ids <- bank_list$bank_id
@@ -34,14 +34,18 @@
     }
     
     if (length(ids_to_fetch) == 0) {
-      return(list(banks = NULL, contacts = NULL))
+      return(list(banks = NULL, contacts = NULL, geometry = NULL))
     }
     
     # Fetch detailed data for each bank
+    # Optimization: Fetch spatial data here if requested to avoid double fetch later
     if (!quietly) cli::cli_alert_info("Fetching detailed API data for {length(ids_to_fetch)} banks...")
     
-    detailed <- rb_get(type, id = ids_to_fetch, ledger = FALSE, 
-                       footprint = FALSE, service_area = FALSE, contacts = TRUE)
+    detailed <- rb_get(type, id = ids_to_fetch, 
+                       ledger = FALSE, 
+                       footprint = include_spatial, 
+                       service_area = include_spatial, 
+                       contacts = TRUE)
     
     # Extract summary and contacts
     banks_data <- if (is.list(detailed) && "summary" %in% names(detailed)) {
@@ -57,15 +61,26 @@
       NULL
     }
     
+    # Extract geometry if requested and present
+    geometry_data <- NULL
+    if (include_spatial && is.list(detailed)) {
+        # Return structured list instead of binding rows
+        # This prevents schema mismatch issues
+        geometry_data <- list(
+            footprints = if (!is.null(detailed$footprint)) detailed$footprint else NULL,
+            service_areas = if (!is.null(detailed$service_area)) detailed$service_area else NULL
+        )
+    }
+    
     # Normalize result columns
     if (!is.null(banks_data)) banks_data <- .normalize_columns(banks_data)
     if (!is.null(contacts_data)) contacts_data <- .normalize_columns(contacts_data)
     
-    list(banks = banks_data, contacts = contacts_data)
+    list(banks = banks_data, contacts = contacts_data, geometry = geometry_data)
     
   }, error = function(e) {
     if (!quietly) cli::cli_alert_warning("API query failed: {e$message}")
-    list(banks = NULL, contacts = NULL)
+    list(banks = NULL, contacts = NULL, geometry = NULL)
   })
 }
 
@@ -234,7 +249,7 @@
 #' Fetch and unify spatial data
 #' @keywords internal
 #' @noRd
-.fetch_harmonized_spatial <- function(query_ids, use_epa, use_api, quietly = FALSE) {
+.fetch_harmonized_spatial <- function(query_ids, use_epa, use_api, geometry_api = NULL, quietly = FALSE) {
   if (!quietly) cli::cli_h3("Step 6: Fetching spatial data")
   
   discrepancies <- tibble::tibble()
@@ -273,64 +288,83 @@
     })
   }
   
-  # 3. Missing footprints from API
+  # 3. API Spatial Data (Footprints & Service Areas)
   ribits_footprints <- NULL
-  if (use_api) {
-    epa_fp_ids <- if (!is.null(epa_footprints)) .col_get(epa_footprints, "bank_id", error_if_missing = FALSE, default = integer()) else integer()
-    missing_fp_ids <- setdiff(query_ids, epa_fp_ids)
-    
-    if (length(missing_fp_ids) > 0 && length(missing_fp_ids) <= 30) {
-       if (!quietly) cli::cli_progress_step("Fetching {length(missing_fp_ids)} missing footprints from API...")
-       ribits_fp_list <- list()
-       for (bid in missing_fp_ids) {
-         tryCatch({
-           bd <- rb_get("banks", id = bid, footprint = TRUE, ledger = FALSE, 
-                        service_area = FALSE, contacts = FALSE)
-           if (!is.null(bd$footprint) && nrow(bd$footprint) > 0) {
-             fp <- bd$footprint
-             fp$source <- "ribits_api"
-             fp$bank_id <- bid
-             ribits_fp_list[[length(ribits_fp_list) + 1]] <- fp
-           }
-         }, error = function(e) NULL)
-         Sys.sleep(0.05)
-       }
-       if (length(ribits_fp_list) > 0) {
-         ribits_footprints <- dplyr::bind_rows(ribits_fp_list)
-         ribits_footprints <- .normalize_columns(ribits_footprints)
-         if (!quietly) cli::cli_alert_success("{nrow(ribits_footprints)} additional footprints from API")
-       }
-    }
-  }
-
-  # 4. Missing service areas from API
   ribits_service_areas <- NULL
+  
   if (use_api) {
-    epa_sa_ids <- if (!is.null(epa_service_areas)) .col_get(epa_service_areas, "bank_id", error_if_missing = FALSE, default = integer()) else integer()
-    missing_sa_ids <- setdiff(query_ids, epa_sa_ids)
-    
-    if (length(missing_sa_ids) > 0 && length(missing_sa_ids) <= 30) {
-       if (!quietly) cli::cli_progress_step("Fetching {length(missing_sa_ids)} service areas from API...")
-       ribits_sa_list <- list()
-       for (bid in missing_sa_ids) {
-         tryCatch({
-           bd <- rb_get("banks", id = bid, service_area = TRUE, footprint = FALSE, 
-                        ledger = FALSE, contacts = FALSE)
-           if (!is.null(bd$service_area) && nrow(bd$service_area) > 0) {
-             sa <- bd$service_area
-             sa$source <- "ribits_api"
-             sa$bank_id <- bid
-             ribits_sa_list[[length(ribits_sa_list) + 1]] <- sa
+      # Use pre-fetched API geometry if available (Passed as list)
+      if (!is.null(geometry_api) && is.list(geometry_api)) {
+           if (!is.null(geometry_api$footprints)) {
+               ribits_footprints <- geometry_api$footprints
+               ribits_footprints$source <- "ribits_api"
+               ribits_footprints <- .normalize_columns(ribits_footprints)
            }
-         }, error = function(e) NULL)
-         Sys.sleep(0.05)
-       }
-       if (length(ribits_sa_list) > 0) {
-         ribits_service_areas <- dplyr::bind_rows(ribits_sa_list)
-         ribits_service_areas <- .normalize_columns(ribits_service_areas)
-         if (!quietly) cli::cli_alert_success("{nrow(ribits_service_areas)} service areas from API")
-       }
-    }
+           if (!is.null(geometry_api$service_areas)) {
+               ribits_service_areas <- geometry_api$service_areas
+               ribits_service_areas$source <- "ribits_api"
+               ribits_service_areas <- .normalize_columns(ribits_service_areas)
+           }
+      }
+      
+      # Fallback: Gap Filling Logic (if no pre-fetched geometry or gaps exist)
+      # Footprints
+      if (is.null(ribits_footprints)) {
+          epa_fp_ids <- if (!is.null(epa_footprints)) .col_get(epa_footprints, "bank_id", error_if_missing = FALSE, default = integer()) else integer()
+          missing_fp_ids <- setdiff(query_ids, epa_fp_ids)
+        
+          if (length(missing_fp_ids) > 0 && length(missing_fp_ids) <= 30) {
+             if (!quietly) cli::cli_progress_step("Fetching {length(missing_fp_ids)} missing footprints from API...")
+             ribits_fp_list <- list()
+             for (bid in missing_fp_ids) {
+               tryCatch({
+                 bd <- rb_get("banks", id = bid, footprint = TRUE, ledger = FALSE, 
+                              service_area = FALSE, contacts = FALSE)
+                 if (!is.null(bd$footprint) && nrow(bd$footprint) > 0) {
+                   fp <- bd$footprint
+                   fp$source <- "ribits_api"
+                   fp$bank_id <- bid
+                   ribits_fp_list[[length(ribits_fp_list) + 1]] <- fp
+                 }
+               }, error = function(e) NULL)
+               Sys.sleep(0.05)
+             }
+             if (length(ribits_fp_list) > 0) {
+               ribits_footprints <- dplyr::bind_rows(ribits_fp_list)
+               ribits_footprints <- .normalize_columns(ribits_footprints)
+               if (!quietly) cli::cli_alert_success("{nrow(ribits_footprints)} additional footprints from API")
+             }
+          }
+      }
+      
+      # Service Areas
+      if (is.null(ribits_service_areas)) {
+          epa_sa_ids <- if (!is.null(epa_service_areas)) .col_get(epa_service_areas, "bank_id", error_if_missing = FALSE, default = integer()) else integer()
+          missing_sa_ids <- setdiff(query_ids, epa_sa_ids)
+        
+          if (length(missing_sa_ids) > 0 && length(missing_sa_ids) <= 30) {
+             if (!quietly) cli::cli_progress_step("Fetching {length(missing_sa_ids)} service areas from API...")
+             ribits_sa_list <- list()
+             for (bid in missing_sa_ids) {
+               tryCatch({
+                 bd <- rb_get("banks", id = bid, service_area = TRUE, footprint = FALSE, 
+                              ledger = FALSE, contacts = FALSE)
+                 if (!is.null(bd$service_area) && nrow(bd$service_area) > 0) {
+                   sa <- bd$service_area
+                   sa$source <- "ribits_api"
+                   sa$bank_id <- bid
+                   ribits_sa_list[[length(ribits_sa_list) + 1]] <- sa
+                 }
+               }, error = function(e) NULL)
+               Sys.sleep(0.05)
+             }
+             if (length(ribits_sa_list) > 0) {
+               ribits_service_areas <- dplyr::bind_rows(ribits_sa_list)
+               ribits_service_areas <- .normalize_columns(ribits_service_areas)
+               if (!quietly) cli::cli_alert_success("{nrow(ribits_service_areas)} service areas from API")
+             }
+          }
+      }
   }
 
   # Combine
@@ -743,3 +777,63 @@
       .groups = "drop"
     )
 }
+
+#' Pivot credits to wide format (Master Summary)
+#' 
+#' Pivots credit classification data to wide format (one row per bank),
+#' creating columns like `wetland_available`, `stream_released`, etc.
+#' 
+#' @param credit_data Long-format credit data
+#' @return Tibble with one row per bank and multiple credit columns
+#' @keywords internal
+#' @noRd
+.pivot_credits_wide <- function(credit_data) {
+  if (is.null(credit_data) || nrow(credit_data) == 0) {
+    return(tibble::tibble(bank_id = integer()))
+  }
+
+  # Validate required columns
+  if (!all(c("bank_id", "credit_classification", "available_credits") %in% names(credit_data))) {
+    return(tibble::tibble(bank_id = integer()))
+  }
+
+  tryCatch({
+    # Clean up classifications for column names
+    # Simplify common terms to keep names reasonable
+    # e.g. "Palustrine Forested Wetland" -> "palustrine_forested_wetland"
+    
+    wide_prep <- credit_data |>
+      dplyr::mutate(
+        # Create cleaner slugs
+        slug = tolower(credit_classification),
+        slug = gsub(" wetland", "", slug), # Remove redundant "wetland" if desired? Maybe keep it.
+        slug = gsub("[^a-z0-9]", "_", slug),
+        slug = gsub("_+", "_", slug),
+        slug = gsub("^_|_$", "", slug)
+      ) |>
+      # Group by bank and slug to handle duplicates (sum them up if any)
+      dplyr::group_by(bank_id, slug) |>
+      dplyr::summarise(
+        avail = sum(available_credits, na.rm = TRUE),
+        released = sum(released_credits, na.rm = TRUE),
+        potential = sum(potential_credits, na.rm = TRUE),
+        .groups = "drop"
+      )
+
+    # Pivot
+    wide <- wide_prep |>
+      tidyr::pivot_wider(
+        id_cols = "bank_id",
+        names_from = "slug",
+        values_from = c("avail", "released", "potential"),
+        names_glue = "{slug}_{.value}",
+        values_fill = 0
+      )
+    
+    wide
+  }, error = function(e) {
+    cli::cli_alert_warning("Failed to pivot credits: {e$message}")
+    tibble::tibble(bank_id = integer())
+  })
+}
+

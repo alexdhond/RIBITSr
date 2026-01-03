@@ -100,28 +100,30 @@ Clear cache with \code{rb_clear_cache()}.
 }
 }
 \examples{
-# View current configuration
+# View current settings
 rb_config()
 
-# Customize network behavior
+# Most common: Enable persistent caching
 rb_config(
-  max_retries = 5,        # More retries for unreliable connections
-  timeout = 60,           # Longer timeout for slow connections
-  rate_limit = 2          # Slower rate (2 requests/sec)
+  use_persistent_cache = TRUE,   # Cache survives R restart
+  cache_max_age_days = 7          # Refresh weekly
 )
 
-# Enable persistent caching
+# For slow/unreliable networks
 rb_config(
-  use_persistent_cache = TRUE,
-  cache_max_age_days = 7  # Refresh cache weekly
+  max_retries = 5,      # More retry attempts
+  timeout = 120,        # Longer timeout
+  rate_limit = 2        # Slower rate (2 req/sec)
 )
 
-# Disable rate limiting for maximum speed
+# For maximum speed (careful with API limits!)
 rb_config(rate_limit = NULL)
 
-# Prioritize API data over CSV
-rb_config(source_priority = c("api", "csv", "epa"))
-
-# Reset everything to defaults
+# Reset to defaults
 rb_config(reset = TRUE)
+
+# Typical usage - just set persistent cache once:
+rb_config(use_persistent_cache = TRUE)
+ca <- ribits(state = "CA")  # Downloads and caches
+ca <- ribits(state = "CA")  # Uses cache (instant!)
 }
