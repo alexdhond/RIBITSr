@@ -56,8 +56,10 @@ volume, temporal patterns, geography, and public notice counts.}
 }
 \value{
 A \code{ribits_data} object containing:
-\item{banks/programs/umbrellas}{Summary data (tibble)}
-\item{transactions}{Transaction/credit tracking data (tibble, banks only)}
+\item{banks}{Summary data (tibble) - always included}
+\item{transactions}{Transaction/credit tracking data (tibble, if detailed=TRUE)}
+\item{credits}{Credit classifications by type (tibble, if detailed=TRUE)}
+\item{notices}{Public notices (tibble, if detailed=TRUE)}
 \item{geometry}{Spatial data including footprints and service areas (sf object)}
 \item{.meta}{Metadata including sources used and any discrepancies}
 }
@@ -77,6 +79,8 @@ ca <- ribits(state = "CA")
 # Access the data
 ca$banks           # All bank attributes, all sources merged
 ca$transactions    # All transaction data (~85 columns)
+ca$credits         # Credit classifications (NEW)
+ca$notices         # Public notices (NEW)
 ca$geometry        # Spatial footprints and service areas
 
 # Filter with tidyverse
@@ -90,10 +94,5 @@ ilf <- ribits(type = "ilf", state = "TX")
 
 # Get specific banks by ID
 my_banks <- ribits(ids = c(17, 100, 345))
-
-# For speed, reduce data:
-# - Basic transactions instead of comprehensive
-# - Skip spatial data
-fast <- ribits(state = "OR", transactions = "basic", spatial = FALSE)
 }
 }

@@ -592,9 +592,10 @@ rb_match_names <- function(data,
     }
   }
   
-  # Normalize names in data
+  # Normalize names in data and add row identifier to preserve duplicates
   data <- data |>
     dplyr::mutate(
+      .row_id = dplyr::row_number(),
       .name_normalized = tolower(.data[[name_col]]) |>
         stringr::str_replace_all("[^a-z0-9]", " ") |>
         stringr::str_squish()
@@ -615,9 +616,9 @@ rb_match_names <- function(data,
   # Step 1b: Smart Disambiguation for ambiguous matches
   # If a name matches multiple IDs, use secondary signals (state, year)
   if (!is.null(state_col) || !is.null(year_col)) {
-    # Count matches per original row
+    # Count matches per original row (exclude .row_id to count across all rows)
     exact_matches <- exact_matches |>
-      dplyr::group_by(dplyr::across(-c(bank_id_exact, lookup_state, lookup_year))) |>
+      dplyr::group_by(dplyr::across(-c(bank_id_exact, lookup_state, lookup_year, .row_id))) |>
       dplyr::mutate(.n_matches = dplyr::n()) |>
       dplyr::ungroup()
     
@@ -653,8 +654,7 @@ rb_match_names <- function(data,
         dplyr::mutate(
           .disambig_score = as.integer(.state_match) * 10 + as.integer(.year_match) * 5
         ) |>
-        dplyr::group_by(dplyr::across(-c(bank_id_exact, lookup_state, lookup_year, 
-                                          .state_match, .year_match, .disambig_score, .n_matches))) |>
+        dplyr::group_by(.row_id) |>  # Group by row ID to keep each input row separate
         dplyr::arrange(dplyr::desc(.disambig_score)) |>
         dplyr::slice(1) |>  # Keep best match per original row
         dplyr::ungroup() |>
@@ -665,9 +665,9 @@ rb_match_names <- function(data,
         dplyr::select(-dplyr::any_of(c("lookup_state", "lookup_year")))
     }
   } else {
-    # No disambiguation columns provided - just take first match
+    # No disambiguation columns provided - just take first match per row
     exact_matches <- exact_matches |>
-      dplyr::group_by(dplyr::across(-c(bank_id_exact, lookup_state, lookup_year))) |>
+      dplyr::group_by(.row_id) |>  # Group by row ID to keep each input row separate
       dplyr::slice(1) |>
       dplyr::ungroup() |>
       dplyr::select(-dplyr::any_of(c("lookup_state", "lookup_year")))
@@ -764,7 +764,7 @@ rb_match_names <- function(data,
         TRUE ~ "unmatched"
       )
     ) |>
-    dplyr::select(-bank_id_exact, -bank_id_fuzzy, -fuzzy_score, -.name_normalized)
+    dplyr::select(-bank_id_exact, -bank_id_fuzzy, -fuzzy_score, -.name_normalized, -.row_id)
   
   # Step 3: Cache unmatched names for user review
   unmatched_names <- result |>

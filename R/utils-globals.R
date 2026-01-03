@@ -406,7 +406,14 @@ rb_clear_cache <- function(type = c("all", "csv", "lookup"), verbose = TRUE) {
 
   # Vectorized lookup using purrr
   purrr::map_chr(state, function(s) {
-    if (nchar(s) == 2) return(toupper(s)) # Already abbreviation
+    if (nchar(s) == 2) {
+      s_upper <- toupper(s)
+      # Validate it's actually a valid state abbreviation
+      if (!s_upper %in% datasets::state.abb) {
+        .config_error(paste0("Invalid state code: '", s_upper, "'. Must be a valid 2-letter state abbreviation."))
+      }
+      return(s_upper)
+    }
 
     # Try exact match on name
     match_idx <- match(tolower(s), tolower(datasets::state.name))
@@ -414,7 +421,7 @@ rb_clear_cache <- function(type = c("all", "csv", "lookup"), verbose = TRUE) {
       return(datasets::state.abb[match_idx])
     }
 
-    # Return original if no match (could be a valid code not in state.name)
-    s
+    # No match found - error
+    .config_error(paste0("Invalid state: '", s, "'. Must be a valid state name or 2-letter abbreviation."))
   })
 }
