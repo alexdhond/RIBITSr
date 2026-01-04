@@ -132,42 +132,8 @@ NULL
   return(NULL)
 }
 
-#' Fetch Batch Sequentially
-#'
-#' Fetches a batch of banks sequentially. This is the fallback when
-#' batch endpoints aren't available.
-#'
-#' @param ids Vector of IDs to fetch
-#' @param what What data to fetch
-#' @param quietly Suppress messages
-#' @param ... Additional parameters
-#'
-#' @return List of results
-#'
-#' @keywords internal
-.fetch_batch_sequential <- function(ids, what = "all", quietly = FALSE, ...) {
-  results <- list()
-
-  for (id in ids) {
-    result <- tryCatch(
-      {
-        rb_get("banks", id = id, what = what, quietly = TRUE, ...)
-      },
-      error = function(e) {
-        if (!quietly) {
-          cli::cli_alert_warning("Failed to fetch bank {id}: {e$message}")
-        }
-        NULL
-      }
-    )
-
-    if (!is.null(result)) {
-      results[[id]] <- result
-    }
-  }
-
-  results
-}
+# REMOVED: .fetch_batch_sequential() - dead code using deprecated rb_get() API
+# Batch fetching is now handled by ribits() and related functions
 
 #' Fetch Banks with Parallel Requests
 #'
@@ -237,7 +203,7 @@ NULL
   for (report_type in report_types) {
     file_path <- tryCatch(
       {
-        rb_download_report(report_type, download_dir = download_dir, quietly = TRUE)
+        rb_download_report(report_type, download_dir = download_dir)
       },
       error = function(e) {
         if (!quietly) {

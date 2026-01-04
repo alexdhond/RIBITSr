@@ -12,7 +12,8 @@ rb_epa(
   program_ids = NULL,
   status = NULL,
   kind = NULL,
-  where = NULL
+  where = NULL,
+  return_geometry = TRUE
 )
 }
 \arguments{
@@ -39,9 +40,11 @@ rb_epa(
 \item{kind}{Optional bank type filter: "Standard", "ILF", "Umbrella", "NRDA"}
 
 \item{where}{Optional custom SQL WHERE clause (overrides other filters)}
+
+\item{return_geometry}{Include geometry? Default TRUE. Set FALSE for attribute-only queries.}
 }
 \value{
-An sf object with the queried features
+An sf object with the queried features (or data.frame if return_geometry = FALSE)
 }
 \description{
 This function is internal and called automatically by \code{ribits()}.

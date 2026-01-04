@@ -160,8 +160,9 @@ rb_params <- function(type = c("banks", "transactions", "contacts")) {
 
   tibble::tibble(
     parameter = col_names,
-    description = descriptions[col_names] |> 
-      ifelse(is.na(.), "Standardized attribute", .),
+    description = ifelse(is.na(descriptions[col_names]),
+                        "Standardized attribute",
+                        descriptions[col_names]),
     type = type
   )
 }

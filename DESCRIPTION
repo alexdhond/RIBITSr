@@ -19,6 +19,7 @@ Suggests:
     httptest2,
     knitr,
     lubridate,
+    openxlsx,
     rmarkdown,
     roxygen2,
     testthat (>= 3.0.0)

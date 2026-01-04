@@ -26,39 +26,37 @@ library(RIBITSr)
 library(dplyr)
 library(ggplot2)
 
-# Step 1: Get all banks in Oregon
-or_banks <- rb_get("banks", state = "OR")
+# Step 1: Get all Oregon data (one function call!)
+or_data <- ribits(state = "OR")
 
 # Step 2: Summarize by status
-or_banks %>%
-  count(bank_status_name) %>%
+or_data$banks %>%
+  count(bank_status) %>%
   arrange(desc(n))
 
-# Step 3: Get detailed data for approved banks
-approved_ids <- or_banks %>%
-  filter(bank_status_name == "Approved") %>%
-  pull(bank_id)
-
-# Step 4: Fetch ledgers for all approved banks
-or_ledgers <- rb_bulk_ledger(bank_ids = approved_ids)
-
-# Step 5: Analyze transaction patterns
-or_ledgers %>%
+# Step 3: Analyze transaction patterns
+or_data$transactions %>%
   group_by(transaction_type) %>%
   summarize(
     n_transactions = n(),
     total_credits = sum(credits, na.rm = TRUE)
   )
 
-# Step 6: Credit availability over time
-or_ledgers %>%
-  filter(transaction_type == "Sell") %>%
+# Step 4: Credit availability over time
+or_data$transactions %>%
+  filter(credit_action == "Sold") %>%
   mutate(year = lubridate::year(transaction_date)) %>%
   group_by(year) %>%
   summarize(credits_sold = sum(credits, na.rm = TRUE)) %>%
   ggplot(aes(x = year, y = credits_sold)) +
   geom_col() +
   labs(title = "Oregon Bank Credits Sold by Year")
+
+# Step 5: Filter to approved banks with high credit availability
+or_data$banks %>%
+  filter(bank_status == "Approved", available_credits > 50) %>%
+  select(bank_id, bank_name, available_credits, total_acres) %>%
+  arrange(desc(available_credits))
 ```
 
 ## Workflow 2: Spatial Analysis with EPA Data
@@ -103,23 +101,30 @@ library(RIBITSr)
 library(dplyr)
 library(tidyr)
 
-# Step 1: Get banks in Portland district
-pdx_banks <- rb_get("banks", district = "Portland")
+# Step 1: Get all Portland district data
+pdx_data <- ribits(district = "Portland")
 
-# Step 2: Get transaction data with credit breakdown
-transactions <- rb_transactions(bank_ids = pdx_banks$bank_id)
-
-# Step 3: Summarize by classification
-transactions$transactions %>%
+# Step 2: Summarize by classification
+pdx_data$transactions %>%
   group_by(credit_classification, jurisdiction) %>%
   summarize(
     n_banks = n_distinct(bank_id),
-    total_credits = sum(credits, na.rm = TRUE)
+    total_credits = sum(credits, na.rm = TRUE),
+    .groups = "drop"
   ) %>%
   arrange(desc(total_credits))
 
+# Step 3: Check credit classifications available
+pdx_data$credits %>%
+  group_by(credit_classification) %>%
+  summarize(
+    total_available = sum(available_credits, na.rm = TRUE),
+    total_released = sum(released_credits, na.rm = TRUE),
+    .groups = "drop"
+  )
+
 # Step 4: Create detailed credit breakdown by bank
-credit_summary <- transactions$transactions %>%
+pdx_data$transactions %>%
   group_by(bank_id, credit_classification, jurisdiction) %>%
   summarize(
     total_credits = sum(credits, na.rm = TRUE),
@@ -137,29 +142,28 @@ Track who is purchasing credits and for which permits.
 library(RIBITSr)
 library(dplyr)
 
-# Step 1: Get banks with ledger data
+# Step 1: Get specific banks by ID
 bank_ids <- c(17, 100, 345, 500, 750)
-banks <- rb_get("banks", id = bank_ids, ledger = TRUE)
+banks_data <- ribits(ids = bank_ids)
 
-# Step 2: Extract all ledgers
-all_ledgers <- purrr::map_dfr(banks, ~ rb_extract(.x, "ledger"))
+# Step 2: Filter to sales (credit purchases)
+sales <- banks_data$transactions %>%
+  filter(credit_action == "Sold") %>%
+  select(bank_id, bank_name, transaction_date, credits, permittee, permit_list)
 
-# Step 3: Filter to sales (credit purchases)
-sales <- all_ledgers %>%
-  filter(transaction_type == "Sell") %>%
-  select(bank_id, transaction_date, credits, permittee_name, permit_list)
-
-# Step 4: Top permittees by credits purchased
+# Step 3: Top permittees by credits purchased
 sales %>%
-  group_by(permittee_name) %>%
+  filter(!is.na(permittee)) %>%
+  group_by(permittee) %>%
   summarize(
     total_credits = sum(credits, na.rm = TRUE),
-    n_transactions = n()
+    n_transactions = n(),
+    .groups = "drop"
   ) %>%
   arrange(desc(total_credits)) %>%
   head(10)
 
-# Step 5: Permits over time
+# Step 4: Permits over time
 sales %>%
   mutate(year = lubridate::year(transaction_date)) %>%
   count(year) %>%
@@ -176,24 +180,24 @@ Compare ILF programs across districts.
 library(RIBITSr)
 library(dplyr)
 
-# Step 1: Get all ILF programs
-all_ilf <- rb_get("ilf")
+# Step 1: Get all California ILF programs
+ca_ilf <- ribits(type = "ilf", state = "CA")
 
-# Step 2: Compare by district
-all_ilf %>%
+# Step 2: Compare programs
+ca_ilf$banks %>%
   count(district, sort = TRUE)
 
-# Step 3: Get details for specific programs
-ca_ilf <- rb_get("ilf", state = "CA")
-ca_ilf_details <- rb_get("ilf", id = ca_ilf$program_id[1:5], 
-                          ledger = TRUE, service_area = TRUE)
-
-# Step 4: Analyze ILF transactions
-ilf_ledgers <- purrr::map_dfr(ca_ilf_details, ~ rb_extract(.x, "ledger"))
-
-ilf_ledgers %>%
+# Step 3: Analyze ILF transactions
+ca_ilf$transactions %>%
   group_by(transaction_type) %>%
-  summarize(total_credits = sum(credits, na.rm = TRUE))
+  summarize(
+    total_credits = sum(credits, na.rm = TRUE),
+    n_transactions = n(),
+    .groups = "drop"
+  )
+
+# Step 4: Get specific ILF programs by ID
+specific_ilf <- ribits(type = "ilf", ids = c(1, 5, 10))
 ```
 
 ## Workflow 6: Potential Credits by Mitigation Type

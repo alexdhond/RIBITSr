@@ -7,7 +7,7 @@
 .claude
 agents
 .gemini
-..Rcheck/
+*.Rcheck/
 *.tar.gz
 
 # Binary artifacts and temporary files

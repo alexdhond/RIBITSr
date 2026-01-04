@@ -9,9 +9,76 @@
 #' @importFrom tidyselect where
 NULL
 
-# NOTE: Previous globalVariables declarations (65 items) have been removed.
-# All column references in dplyr operations now use the .data pronoun instead
-# of bare column names, following tidyverse best practices for NSE.
+# Suppress CMD check notes for NSE (non-standard evaluation) in dplyr/tidyr
+# These are column names that appear in user data and are referenced in tidyverse operations
+utils::globalVariables(c(
+  # Core identifiers
+  "bank_id", "bank_name", "bank_status", "bank_type", "transaction_id",
+  "name", "state", "district", "year_established",
+
+  # Transaction columns
+  "transaction_date", "transaction_type", "credits", "acres",
+  "credit_action", "credit_classification", "credit_type", "resource_type",
+
+  # Geographic columns
+  "geometry", "state_list", "impact_huc", "impact_state",
+  "impact_latitude", "impact_longitude", "jurisdiction",
+
+  # Permit/project columns
+  "permit", "permittee", "permit_auth_date", "permit_list",
+  "parent_project_name", "sub_ledger_project_name", "sub_ledger_id",
+
+  # Credit tracking
+  "available_credits", "released_credits", "potential_credits",
+  "total_available_credits", "total_released_credits", "total_potential_credits",
+
+  # Flags and indicators
+  "is_ilf", "is_purchased", "is_transferred", "is_blm_project_program_site",
+
+  # Contact columns
+  "sponsor_name", "contact_type", "first_name", "last_name", "email", "phone",
+  "primary_sponsor",
+
+  # Date columns
+  "create_date", "anticipated_release_date",
+
+  # Harmonization/diagnostic columns
+  "source", "source1", "value1", "value2", "resolved_source",
+  "api_available", "api_released", "api_potential",
+  "csv_available", "csv_released", "csv_potential",
+  "pct_diff_available", "pct_diff_released", "pct_diff_potential",
+  "discrepancy_available", "discrepancy_released", "discrepancy_potential",
+  "has_discrepancy",
+
+  # Spatial diagnostic columns
+  "has_centroid", "has_footprint", "has_service_area",
+  "epa_available", "epa_layer", "epa_count", "csv_count",
+  "pct_footprints", "pct_service_areas", "status_limitation",
+
+  # Summary columns
+  "n_transactions", "Metric", "slug",
+
+  # Name matching columns
+  "name_normalized", "name_variants", "canonical_name",
+  "bank_id_exact", "bank_id_fuzzy", "bank_id_from_match",
+  "fuzzy_score", "match_quality", "confidence_score", "source_count",
+  "lookup_state", "lookup_year", "sources",
+
+  # Temporary/internal columns (prefixed with .)
+  ".row_completeness", ".parsed_date", ".date_diff", ".is_near_dupe",
+  ".state_match", ".year_match", ".disambig_score", ".n_matches",
+  ".name_normalized", ".row_id",
+
+  # Harmonization lookup columns
+  "bank_name_lookup", "bank_name_global",
+
+  # EPA-specific columns (exact case from data)
+  "Bank ID", "Name", "State List", "State Abbrev List",
+  "Bank Status", "Bank Type", "banks_lookup",
+
+  # Special constant
+  "NA_POSIXct_"
+))
 
 # ---- Utility Functions ----
 

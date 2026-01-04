@@ -109,12 +109,15 @@ rb_discrepancy_report <- function(data,
 }
 
 
-#' Compare data sources side-by-side
+#' View discrepancies with side-by-side source comparison
 #'
 #' @description
 #' View side-by-side comparison of all data sources (API, CSV, EPA) for specific
-#' banks or fields. This helps understand why sources disagree and what the
-#' auto-harmonization logic chose.
+#' banks or fields where there are discrepancies. This helps understand why sources
+#' disagree and what the auto-harmonization logic chose.
+#'
+#' **Note:** For general ledger source comparison (data completeness metrics), use
+#' `rb_compare_sources()` from diagnostics-sources.R instead.
 #'
 #' @param data A ribits_data object
 #' @param bank_id Optional bank ID to filter comparison. If NULL, shows all banks
@@ -129,16 +132,16 @@ rb_discrepancy_report <- function(data,
 #' \dontrun{
 #' ca <- ribits(state = "CA")
 #'
-#' # Compare all sources for a specific bank
-#' rb_compare_sources(ca, bank_id = "SAC-001")
+#' # View discrepancies for a specific bank
+#' rb_view_discrepancies(ca, bank_id = "SAC-001")
 #'
-#' # Compare a specific field across all banks
-#' rb_compare_sources(ca, field = "total_credits")
+#' # View discrepancies for a specific field across all banks
+#' rb_view_discrepancies(ca, field = "total_credits")
 #'
-#' # Focused comparison: one bank, one field
-#' rb_compare_sources(ca, bank_id = "SAC-001", field = "total_credits")
+#' # Focused view: one bank, one field
+#' rb_view_discrepancies(ca, bank_id = "SAC-001", field = "total_credits")
 #' }
-rb_compare_sources <- function(data, bank_id = NULL, field = NULL) {
+rb_view_discrepancies <- function(data, bank_id = NULL, field = NULL) {
 
   # Get discrepancies and resolutions
   disc <- data$.meta$discrepancies

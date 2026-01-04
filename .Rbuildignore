@@ -19,3 +19,8 @@
 ^\.\.Rcheck$
 ^doc$
 ^Meta$
+^\.DS_Store$
+^\.gitignore$
+^\.git$
+^WORKFLOW\.md$
+^CLAUDE\.md$

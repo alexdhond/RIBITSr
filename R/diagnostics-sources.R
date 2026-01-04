@@ -73,7 +73,9 @@ if (!("source" %in% names(ledger))) {
     
     field_stats <- sapply(key_fields, function(col) {
       vals <- sub[[col]]
-      non_empty <- sum(!is.na(vals) & vals != "" & vals != "NA")
+      # Convert to character for string comparisons (handles Date/POSIXct safely)
+      vals_char <- as.character(vals)
+      non_empty <- sum(!is.na(vals) & vals_char != "" & vals_char != "NA")
       round(100 * non_empty / n, 1)
     })
     
@@ -149,12 +151,7 @@ if (!("source" %in% names(ledger))) {
     }
   }
   
-  invisible(list(
-    completeness = completeness,
-    merged_better_fields = merged_better,
-    api_better_fields = api_better,
-    n_total = nrow(ledger)
-  ))
+  invisible(completeness)
 }
 #' Internal: Source comparison diagnostics
 #' @keywords internal
@@ -208,7 +205,9 @@ if (!("source" %in% names(ledger))) {
 
     field_stats <- sapply(key_fields, function(col) {
       vals <- sub[[col]]
-      non_empty <- sum(!is.na(vals) & vals != "" & vals != "NA")
+      # Convert to character for string comparisons (handles Date/POSIXct safely)
+      vals_char <- as.character(vals)
+      non_empty <- sum(!is.na(vals) & vals_char != "" & vals_char != "NA")
       round(100 * non_empty / n, 1)
     })
 
@@ -283,12 +282,7 @@ if (!("source" %in% names(ledger))) {
     }
   }
 
-  invisible(list(
-    completeness = completeness,
-    merged_better_fields = merged_better,
-    api_better_fields = api_better,
-    n_total = nrow(ledger)
-  ))
+  invisible(completeness)
 }
 
 
@@ -489,7 +483,7 @@ rb_validate_credits <- function(bank_ids = NULL,
         dplyr::arrange(dplyr::desc(pmax(
           pct_diff_available, pct_diff_released, pct_diff_potential, na.rm = TRUE
         ))) |>
-        dplyr::head(5)
+        head(5)
 
       if (nrow(worst) > 0) {
         cli::cli_h3("Top Discrepancies")

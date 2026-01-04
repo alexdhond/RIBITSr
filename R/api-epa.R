@@ -28,7 +28,8 @@
 #' @param status Optional status filter: "Approved", "Pending", "Terminated"
 #' @param kind Optional bank type filter: "Standard", "ILF", "Umbrella", "NRDA"
 #' @param where Optional custom SQL WHERE clause (overrides other filters)
-#' @return An sf object with the queried features
+#' @param return_geometry Include geometry? Default TRUE. Set FALSE for attribute-only queries.
+#' @return An sf object with the queried features (or data.frame if return_geometry = FALSE)
 #' @keywords internal
 #' @examples
 #' \dontrun{
@@ -54,7 +55,8 @@ rb_epa <- function(layer = NULL,
                    program_ids = NULL,
                    status = NULL,
                    kind = NULL,
-                   where = NULL) {
+                   where = NULL,
+                   return_geometry = TRUE) {
   
   # Layer mapping to internal layer names
   layer_map <- list(
@@ -124,8 +126,8 @@ rb_epa <- function(layer = NULL,
   if (layer %in% c("ilf_programs", "ilf_service_areas") && !is.null(program_ids)) {
     ids <- program_ids
   }
-  
-  rb_epa_query(internal_layer, where = where, bank_ids = ids)
+
+  rb_epa_query(internal_layer, where = where, bank_ids = ids, return_geometry = return_geometry)
 }
 
 

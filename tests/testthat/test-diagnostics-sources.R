@@ -109,12 +109,12 @@ test_that("rb_compare_sources() calculates completeness correctly", {
 
     # credits should be ~50% (5 out of 10)
     if ("credits" %in% names(field_pct)) {
-      expect_equal(field_pct["credits"], 50.0)
+      expect_equal(field_pct[["credits"]], 50.0)
     }
 
     # transaction_date should be 100%
     if ("transaction_date" %in% names(field_pct)) {
-      expect_equal(field_pct["transaction_date"], 100.0)
+      expect_equal(field_pct[["transaction_date"]], 100.0)
     }
   }
 })
@@ -297,7 +297,7 @@ test_that("rb_compare_sources() handles all NA columns", {
   # Completeness for all-NA fields should be 0%
   if (!is.null(result$api) && "field_pct" %in% names(result$api)) {
     if ("credits" %in% names(result$api$field_pct)) {
-      expect_equal(result$api$field_pct["credits"], 0.0)
+      expect_equal(result$api$field_pct[["credits"]], 0.0)
     }
   }
 })

@@ -98,11 +98,11 @@
 
   if (!is.null(api_ledger) && !is.null(csv_ledger)) {
     # Prepare API
-    api_std <- api_ledger |> dplyr::mutate(across(everything(), as.character))
+    api_std <- api_ledger |> dplyr::mutate(dplyr::across(dplyr::everything(), as.character))
 
     # Prepare CSV (mimic harmonization logic)
     csv_std <- csv_ledger |>
-      dplyr::mutate(across(everything(), as.character)) |>
+      dplyr::mutate(dplyr::across(dplyr::everything(), as.character)) |>
       dplyr::rename_with(~ dplyr::case_when(
         .x == "parent_transaction_id" ~ "transaction_id",
         TRUE ~ .x

@@ -37,20 +37,8 @@ test_that(".try_batch_endpoint returns NULL (not yet implemented)", {
   expect_null(result)
 })
 
-test_that(".fetch_batch_sequential handles empty input", {
-  result <- .fetch_batch_sequential(character(0), quietly = TRUE)
-  expect_equal(result, list())
-})
-
-test_that(".fetch_batch_sequential handles errors gracefully", {
-  # This will try to call rb_get which may not work without API setup
-  # The function should catch errors and return empty list
-  result <- tryCatch(
-    .fetch_batch_sequential(c("INVALID_ID_123"), quietly = TRUE),
-    error = function(e) list()
-  )
-  expect_true(is.list(result))
-})
+# REMOVED: Tests for .fetch_batch_sequential - function deleted as dead code
+# (used deprecated rb_get() API, never called in package)
 
 test_that(".fetch_banks_parallel handles empty input", {
   result <- .fetch_banks_parallel(character(0), quietly = TRUE)

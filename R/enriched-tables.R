@@ -682,7 +682,7 @@ print.ribits_enriched_credits <- function(x, ...) {
   cli::cli_alert_info("Banks: {attr(x, 'n_banks')}")
   cli::cli_alert_info("Format: {attr(x, 'format')}")
   cli::cli_alert_info("Fetched: {attr(x, 'fetch_date')}")
-  if (attr(x, "include_releases")) {
+  if (isTRUE(attr(x, "include_releases"))) {
     cli::cli_alert_info("Includes: anticipated releases")
   }
   cat("\n")
@@ -697,9 +697,9 @@ print.ribits_enriched_banks <- function(x, ...) {
   cli::cli_alert_info("Fetched: {attr(x, 'fetch_date')}")
 
   includes <- c()
-  if (attr(x, "include_credits")) includes <- c(includes, "credits")
-  if (attr(x, "include_transaction_summary")) includes <- c(includes, "transactions")
-  if (attr(x, "include_geometry")) includes <- c(includes, "geometry")
+  if (isTRUE(attr(x, "include_credits"))) includes <- c(includes, "credits")
+  if (isTRUE(attr(x, "include_transaction_summary"))) includes <- c(includes, "transactions")
+  if (isTRUE(attr(x, "include_geometry"))) includes <- c(includes, "geometry")
   if (length(includes) > 0) {
     cli::cli_alert_info("Includes: {paste(includes, collapse = ', ')}")
   }

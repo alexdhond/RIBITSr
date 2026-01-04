@@ -63,12 +63,12 @@ create_mock_data_with_discrepancies <- function() {
 }
 
 
-test_that("rb_compare_sources() displays side-by-side comparison", {
+test_that("rb_view_discrepancies() displays side-by-side comparison", {
 
   data <- create_mock_data_with_discrepancies()
 
   # Test filtering by bank_id
-  result <- rb_compare_sources(data, bank_id = "SAC-001")
+  result <- rb_view_discrepancies(data, bank_id = "SAC-001")
 
   expect_s3_class(result, "tbl_df")
   expect_true(nrow(result) > 0)
@@ -82,22 +82,22 @@ test_that("rb_compare_sources() displays side-by-side comparison", {
 })
 
 
-test_that("rb_compare_sources() filters by field", {
+test_that("rb_view_discrepancies() filters by field", {
 
   data <- create_mock_data_with_discrepancies()
 
-  result <- rb_compare_sources(data, field = "total_credits")
+  result <- rb_view_discrepancies(data, field = "total_credits")
 
   expect_s3_class(result, "tbl_df")
   expect_true(all(result$field == "total_credits"))
 })
 
 
-test_that("rb_compare_sources() handles bank and field filter together", {
+test_that("rb_view_discrepancies() handles bank and field filter together", {
 
   data <- create_mock_data_with_discrepancies()
 
-  result <- rb_compare_sources(data, bank_id = "SAC-001", field = "total_credits")
+  result <- rb_view_discrepancies(data, bank_id = "SAC-001", field = "total_credits")
 
   expect_s3_class(result, "tbl_df")
   expect_equal(nrow(result), 1)
@@ -106,13 +106,13 @@ test_that("rb_compare_sources() handles bank and field filter together", {
 })
 
 
-test_that("rb_compare_sources() handles no discrepancies gracefully", {
+test_that("rb_view_discrepancies() handles no discrepancies gracefully", {
 
   data <- create_mock_data_with_discrepancies()
   data$.meta$discrepancies <- tibble::tibble()
   data$.meta$harmonization_resolutions <- tibble::tibble()
 
-  result <- rb_compare_sources(data)
+  result <- rb_view_discrepancies(data)
 
   expect_s3_class(result, "tbl_df")
   expect_equal(nrow(result), 0)
